@@ -86,7 +86,9 @@ export type PageQuery =
     // Act-as-the-player commands — only ever triggered by an explicit user
     // action in the toolbox UI (typing a message and pressing send).
     | { type: 'send-whisper'; target: number; message: string }
-    | { type: 'send-beep'; target: number; message: string };
+    | { type: 'send-beep'; target: number; message: string }
+    | { type: 'wardrobe-rename'; slot: number; name: string }
+    | { type: 'wardrobe-clear'; slot: number };
 
 export type PageQueryResult =
     | { success: true; data: unknown }

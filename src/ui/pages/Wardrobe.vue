@@ -137,6 +137,77 @@ function sourceLabel(key: SourceKey): string {
     return snapshot ? new Date(snapshot.taken).toLocaleString() : '?';
 }
 
+// -- Slot actions (rename / clear) -------------------------------------------
+
+const renamingSlot = ref<number | null>(null);
+const renameValue = ref('');
+const confirmClearSlot = ref<number | null>(null);
+const actionBusy = ref(false);
+const actionError = ref<string | null>(null);
+
+const canEdit = computed(() => source.value === 'live' && online.value);
+
+function startRename(slot: DisplaySlot) {
+    renamingSlot.value = slot.index;
+    renameValue.value = slot.name;
+    confirmClearSlot.value = null;
+    actionError.value = null;
+}
+
+async function applyRename(slot: DisplaySlot) {
+    const name = renameValue.value.trim();
+    if (!name || actionBusy.value) return;
+    actionBusy.value = true;
+    actionError.value = null;
+    try {
+        const result = await api('page.query', {
+            memberNumber: viewer.value,
+            query: { type: 'wardrobe-rename', slot: slot.index, name },
+        });
+        if (result.success) {
+            renamingSlot.value = null;
+            await loadLive();
+        } else {
+            actionError.value = result.error;
+        }
+    } catch (e) {
+        actionError.value = e instanceof Error ? e.message : String(e);
+    } finally {
+        actionBusy.value = false;
+    }
+}
+
+async function clearSlot(slot: DisplaySlot) {
+    if (confirmClearSlot.value !== slot.index) {
+        confirmClearSlot.value = slot.index;
+        renamingSlot.value = null;
+        actionError.value = null;
+        setTimeout(() => {
+            if (confirmClearSlot.value === slot.index) confirmClearSlot.value = null;
+        }, 5_000);
+        return;
+    }
+    if (actionBusy.value) return;
+    actionBusy.value = true;
+    actionError.value = null;
+    try {
+        const result = await api('page.query', {
+            memberNumber: viewer.value,
+            query: { type: 'wardrobe-clear', slot: slot.index },
+        });
+        if (result.success) {
+            confirmClearSlot.value = null;
+            await loadLive();
+        } else {
+            actionError.value = result.error;
+        }
+    } catch (e) {
+        actionError.value = e instanceof Error ? e.message : String(e);
+    } finally {
+        actionBusy.value = false;
+    }
+}
+
 // -- Diffing -----------------------------------------------------------------
 
 function itemKey(item: WornItem): string {
@@ -268,6 +339,56 @@ const changedCount = computed(
                     </div>
                     <div class="text-xs text-neutral-500">
                         Slot {{ slot.index + 1 }} · {{ slot.items.length }} items
+                    </div>
+
+                    <div v-if="canEdit" class="mt-1.5" @click.stop>
+                        <form
+                            v-if="renamingSlot === slot.index"
+                            class="flex items-center gap-1"
+                            @submit.prevent="applyRename(slot)"
+                        >
+                            <input
+                                v-model="renameValue"
+                                class="input min-w-0 flex-1 px-1.5 py-0.5 text-xs"
+                                maxlength="20"
+                            />
+                            <button type="submit" class="btn px-1.5 py-0.5 text-[10px]" :disabled="actionBusy">
+                                Save
+                            </button>
+                            <button
+                                type="button"
+                                class="btn px-1.5 py-0.5 text-[10px]"
+                                @click="renamingSlot = null"
+                            >
+                                ✕
+                            </button>
+                        </form>
+                        <div v-else class="flex items-center gap-2">
+                            <button
+                                class="text-[11px] text-neutral-500 hover:text-white"
+                                @click="startRename(slot)"
+                            >
+                                Rename
+                            </button>
+                            <button
+                                class="text-[11px]"
+                                :class="
+                                    confirmClearSlot === slot.index
+                                        ? 'font-medium text-rose-300'
+                                        : 'text-neutral-500 hover:text-rose-300'
+                                "
+                                :disabled="actionBusy"
+                                @click="clearSlot(slot)"
+                            >
+                                {{ confirmClearSlot === slot.index ? 'Really clear?' : 'Clear' }}
+                            </button>
+                        </div>
+                        <p
+                            v-if="actionError && (renamingSlot === slot.index || confirmClearSlot === slot.index)"
+                            class="mt-1 text-[10px] text-red-400"
+                        >
+                            {{ actionError }}
+                        </p>
                     </div>
 
                     <div v-if="expanded === slot.index" class="mt-2 border-t border-white/10 pt-2 text-xs">

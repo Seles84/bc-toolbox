@@ -93,6 +93,55 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
             return { success: true, data: { members } };
         }
 
+        case 'wardrobe-rename': {
+            if (!Player?.MemberNumber) {
+                return { success: false, error: 'Not logged in' };
+            }
+            const name = query.name.replace(/[^A-Za-z0-9 ]/g, '').trim().slice(0, 20);
+            if (!name) {
+                return { success: false, error: 'Name must be letters, numbers and spaces' };
+            }
+            if (query.slot >= 96) {
+                return { success: false, error: 'WCE local slots (97+) have no server-side names' };
+            }
+            if (query.slot < 0 || query.slot >= (Player.WardrobeCharacterNames?.length ?? 0)) {
+                return { success: false, error: 'No such wardrobe slot' };
+            }
+            // Set without the game's full-array push, then sync only the
+            // server-backed portion (mirrors WCE's own name sync).
+            WardrobeSetCharacterName(query.slot, name, false);
+            ServerAccountUpdate.QueueData({
+                WardrobeCharacterNames: Player.WardrobeCharacterNames.slice(0, 96),
+            });
+            return { success: true, data: null };
+        }
+
+        case 'wardrobe-clear': {
+            if (!Player?.MemberNumber) {
+                return { success: false, error: 'Not logged in' };
+            }
+            if (!Player.Wardrobe || query.slot < 0 || query.slot >= Player.Wardrobe.length) {
+                return { success: false, error: 'No such wardrobe slot' };
+            }
+            // "Clear" = save the player's bare body into the slot (BC slots
+            // are never empty — the game randomizes empty ones).
+            Player.Wardrobe[query.slot] = Player.Appearance.filter(
+                (a) => a.Asset.Group.Category === 'Appearance' && !a.Asset.Group.Clothing,
+            ).map(WardrobeAssetBundle);
+            // The hooked global lets WCE split extended/local slots correctly.
+            ServerAccountUpdate.QueueData({ Wardrobe: CharacterCompressWardrobe(Player.Wardrobe) });
+            const dummy = WardrobeCharacter?.[query.slot];
+            if (dummy) {
+                try {
+                    dummy.Appearance = [];
+                    WardrobeFastLoad(dummy, query.slot, false);
+                } catch {
+                    // Preview refresh is cosmetic — the next full load fixes it.
+                }
+            }
+            return { success: true, data: null };
+        }
+
         case 'send-whisper': {
             if (!Player?.MemberNumber) {
                 return { success: false, error: 'Not logged in' };
