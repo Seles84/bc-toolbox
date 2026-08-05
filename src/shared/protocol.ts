@@ -105,8 +105,10 @@ export interface RosterMember {
 export interface WardrobeSlotInfo {
     index: number;
     name: string;
-    /** Cropped PNG data-URL; missing when the game hasn't drawn the slot yet */
+    /** Cropped data-URL; missing when the game hasn't drawn the slot yet */
     image?: string;
+    /** Clothing/restraints in the slot's outfit */
+    items?: import('./records').WornItem[];
 }
 
 export type ToPageMessage =

@@ -1,33 +1,39 @@
 <script setup lang="ts">
 /**
- * View of the selected character's wardrobe save slots. This is a LIVE query
- * into the game tab (the wardrobe isn't captured to the database), so the
- * character must be online.
+ * Wardrobe with history: view the live wardrobe, save point-in-time
+ * snapshots, browse them offline, and diff any two sources slot by slot.
  */
 import { computed, onMounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import { db } from '@/shared/db';
+import type { WardrobeSlotSnapshot, WardrobeSnapshotRecord, WornItem } from '@/shared/records';
 import type { WardrobeSlotInfo } from '@/shared/protocol';
 import { api } from '../api';
+import { useLiveQuery } from '../composables/useLiveQuery';
 import { useSessionStore } from '../stores/session';
 
 const route = useRoute();
 const session = useSessionStore();
 const viewer = computed(() => Number(route.params.viewer));
 
-const slots = ref<WardrobeSlotInfo[]>([]);
+// -- Live wardrobe -----------------------------------------------------------
+
+const liveSlots = ref<WardrobeSlotInfo[]>([]);
+const liveLoaded = ref(false);
 const loading = ref(false);
 const error = ref<string | null>(null);
 
 const online = computed(() => session.tabs.some((t) => t.memberNumber === viewer.value));
 
-async function load() {
+async function loadLive() {
     loading.value = true;
     error.value = null;
     try {
         await session.refreshTabs();
         if (!online.value) {
-            error.value = 'This character is not online in a game tab — the wardrobe can only be read live.';
-            slots.value = [];
+            error.value = 'Character offline — showing saved snapshots only.';
+            liveSlots.value = [];
+            liveLoaded.value = false;
             return;
         }
         const result = await api('page.query', {
@@ -36,10 +42,10 @@ async function load() {
         });
         if (!result.success) {
             error.value = result.error;
-            slots.value = [];
             return;
         }
-        slots.value = (result.data as { slots: WardrobeSlotInfo[] }).slots;
+        liveSlots.value = (result.data as { slots: WardrobeSlotInfo[] }).slots;
+        liveLoaded.value = true;
     } catch (e) {
         error.value = e instanceof Error ? e.message : String(e);
     } finally {
@@ -47,42 +53,277 @@ async function load() {
     }
 }
 
-onMounted(load);
-watch(viewer, load);
+// -- Snapshots ---------------------------------------------------------------
+
+const snapshots = useLiveQuery<WardrobeSnapshotRecord[]>(
+    () => db.wardrobeSnapshots.where('member').equals(viewer.value).reverse().sortBy('taken'),
+    [viewer],
+    [],
+);
+
+const saving = ref(false);
+const savedAt = ref<number | null>(null);
+
+async function saveSnapshot() {
+    if (!liveLoaded.value) {
+        await loadLive();
+        if (!liveLoaded.value) return;
+    }
+    saving.value = true;
+    try {
+        const slots: WardrobeSlotSnapshot[] = liveSlots.value.map((slot) => ({
+            index: slot.index,
+            name: slot.name,
+            image: slot.image,
+            items: (slot.items ?? []).map((item) => ({ ...item })),
+        }));
+        await db.wardrobeSnapshots.add({ member: viewer.value, taken: Date.now(), slots });
+        savedAt.value = Date.now();
+    } finally {
+        saving.value = false;
+    }
+}
+
+async function deleteSnapshot(id?: number) {
+    if (id === undefined) return;
+    await db.wardrobeSnapshots.delete(id);
+    if (source.value === id) source.value = 'live';
+    if (compare.value === id) compare.value = '';
+}
+
+function snapshotSize(snapshot: WardrobeSnapshotRecord): number {
+    return JSON.stringify(snapshot).length;
+}
+
+// -- Source / compare selection ----------------------------------------------
+
+type SourceKey = 'live' | number;
+const source = ref<SourceKey>('live');
+const compare = ref<'' | SourceKey>('');
+const expanded = ref<number | null>(null);
+
+watch(viewer, () => {
+    source.value = 'live';
+    compare.value = '';
+    expanded.value = null;
+    savedAt.value = null;
+    void loadLive();
+});
+onMounted(loadLive);
+
+interface DisplaySlot {
+    index: number;
+    name: string;
+    image?: string;
+    items: WornItem[];
+}
+
+function slotsOf(key: SourceKey): DisplaySlot[] | null {
+    if (key === 'live') {
+        return liveLoaded.value
+            ? liveSlots.value.map((s) => ({ ...s, items: s.items ?? [] }))
+            : null;
+    }
+    const snapshot = snapshots.value.find((s) => s.id === key);
+    return snapshot ? snapshot.slots : null;
+}
+
+const shownSlots = computed(() => slotsOf(source.value));
+const compareSlots = computed(() => (compare.value === '' ? null : slotsOf(compare.value)));
+
+function sourceLabel(key: SourceKey): string {
+    if (key === 'live') return 'Live';
+    const snapshot = snapshots.value.find((s) => s.id === key);
+    return snapshot ? new Date(snapshot.taken).toLocaleString() : '?';
+}
+
+// -- Diffing -----------------------------------------------------------------
+
+function itemKey(item: WornItem): string {
+    return `${item.group}|${item.asset}|${item.color ?? ''}|${item.craftName ?? ''}`;
+}
+
+function slotSignature(items: WornItem[]): string {
+    return items.map(itemKey).sort().join('~');
+}
+
+interface SlotDiff {
+    changed: boolean;
+    added: WornItem[];
+    removed: WornItem[];
+}
+
+const diffs = computed<Map<number, SlotDiff> | null>(() => {
+    const base = shownSlots.value;
+    const other = compareSlots.value;
+    if (!base || !other) return null;
+    const otherByIndex = new Map(other.map((s) => [s.index, s]));
+    const result = new Map<number, SlotDiff>();
+    for (const slot of base) {
+        const counterpart = otherByIndex.get(slot.index);
+        const otherItems = counterpart?.items ?? [];
+        if (slotSignature(slot.items) === slotSignature(otherItems)) {
+            result.set(slot.index, { changed: false, added: [], removed: [] });
+            continue;
+        }
+        const otherKeys = new Set(otherItems.map(itemKey));
+        const baseKeys = new Set(slot.items.map(itemKey));
+        result.set(slot.index, {
+            changed: true,
+            added: slot.items.filter((i) => !otherKeys.has(itemKey(i))),
+            removed: otherItems.filter((i) => !baseKeys.has(itemKey(i))),
+        });
+    }
+    return result;
+});
+
+const changedCount = computed(
+    () => (diffs.value ? [...diffs.value.values()].filter((d) => d.changed).length : 0),
+);
 </script>
 
 <template>
     <div>
-        <div class="mb-5 flex flex-wrap items-center gap-4">
+        <div class="mb-5 flex flex-wrap items-center gap-3">
             <h1 class="text-2xl font-semibold text-white">Wardrobe</h1>
-            <span v-if="slots.length" class="text-sm text-neutral-500">{{ slots.length }} slots</span>
-            <button class="btn ml-auto" :disabled="loading" @click="load">
-                {{ loading ? 'Loading…' : 'Refresh' }}
-            </button>
+
+            <select v-model="source" class="input w-auto py-1.5">
+                <option value="live">Live</option>
+                <option v-for="snapshot in snapshots" :key="snapshot.id" :value="snapshot.id">
+                    {{ new Date(snapshot.taken).toLocaleString() }}
+                </option>
+            </select>
+
+            <label class="flex items-center gap-1.5 text-sm text-neutral-500">
+                vs
+                <select v-model="compare" class="input w-auto py-1.5">
+                    <option value="">—</option>
+                    <option v-if="source !== 'live'" value="live">Live</option>
+                    <option
+                        v-for="snapshot in snapshots.filter((s) => s.id !== source)"
+                        :key="snapshot.id"
+                        :value="snapshot.id"
+                    >
+                        {{ new Date(snapshot.taken).toLocaleString() }}
+                    </option>
+                </select>
+            </label>
+
+            <span v-if="diffs" class="text-sm" :class="changedCount ? 'text-amber-300' : 'text-emerald-400'">
+                {{ changedCount ? `${changedCount} slots differ` : 'No differences' }}
+            </span>
+
+            <div class="ml-auto flex items-center gap-2">
+                <button class="btn" :disabled="loading" @click="loadLive">
+                    {{ loading ? 'Loading…' : 'Refresh live' }}
+                </button>
+                <button
+                    class="btn btn-accent"
+                    :disabled="saving || !online"
+                    :title="online ? 'Save the live wardrobe as a snapshot' : 'Character must be online'"
+                    @click="saveSnapshot"
+                >
+                    {{ saving ? 'Saving…' : 'Save snapshot' }}
+                </button>
+                <span v-if="savedAt" class="text-xs text-emerald-400">Saved</span>
+            </div>
         </div>
 
-        <div v-if="loading && !slots.length" class="card mx-auto max-w-md p-8 text-center text-neutral-400">
-            Reading wardrobe from the game…
-        </div>
+        <p v-if="error" class="mb-4 text-sm text-amber-400">{{ error }}</p>
 
-        <div v-else-if="error" class="card mx-auto max-w-lg p-8 text-center">
-            <p class="mb-2 text-neutral-200">Wardrobe unavailable</p>
-            <p class="text-sm text-neutral-400">{{ error }}</p>
+        <div v-if="!shownSlots" class="card mx-auto max-w-lg p-8 text-center text-neutral-400">
+            <template v-if="source === 'live'">
+                No live wardrobe loaded.
+                <template v-if="snapshots.length">
+                    Pick a snapshot from the dropdown to browse offline.
+                </template>
+            </template>
+            <template v-else>Snapshot not found.</template>
         </div>
 
         <div v-else class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
-            <div v-for="slot in slots" :key="slot.index" class="card overflow-hidden">
+            <div
+                v-for="slot in shownSlots"
+                :key="slot.index"
+                class="card cursor-pointer overflow-hidden"
+                :class="diffs?.get(slot.index)?.changed ? 'border-amber-500/50' : ''"
+                @click="expanded = expanded === slot.index ? null : slot.index"
+            >
                 <div class="flex h-52 items-center justify-center bg-surface-2/60 p-2">
                     <img v-if="slot.image" :src="slot.image" alt="" class="h-full object-contain" />
-                    <span v-else class="px-4 text-center text-xs text-neutral-600">
-                        Not rendered — open the wardrobe in-game once, then refresh
-                    </span>
+                    <span v-else class="px-4 text-center text-xs text-neutral-600">No preview</span>
                 </div>
                 <div class="p-3">
-                    <div class="truncate text-sm font-medium text-white">{{ slot.name }}</div>
-                    <div class="text-xs text-neutral-500">Slot {{ slot.index + 1 }}</div>
+                    <div class="flex items-center gap-2">
+                        <span class="truncate text-sm font-medium text-white">{{ slot.name }}</span>
+                        <span
+                            v-if="diffs?.get(slot.index)?.changed"
+                            class="ml-auto shrink-0 rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300"
+                            >changed</span
+                        >
+                    </div>
+                    <div class="text-xs text-neutral-500">
+                        Slot {{ slot.index + 1 }} · {{ slot.items.length }} items
+                    </div>
+
+                    <div v-if="expanded === slot.index" class="mt-2 border-t border-white/10 pt-2 text-xs">
+                        <template v-if="diffs?.get(slot.index)?.changed">
+                            <p
+                                v-for="item in diffs.get(slot.index)!.added"
+                                :key="'a' + itemKey(item)"
+                                class="text-emerald-300"
+                            >
+                                + {{ item.name }}
+                                <span class="text-neutral-600">{{ item.groupLabel }}</span>
+                            </p>
+                            <p
+                                v-for="item in diffs.get(slot.index)!.removed"
+                                :key="'r' + itemKey(item)"
+                                class="text-rose-300"
+                            >
+                                − {{ item.name }}
+                                <span class="text-neutral-600">{{ item.groupLabel }}</span>
+                            </p>
+                            <p class="mt-1 text-neutral-600">vs {{ sourceLabel(compare as any) }}</p>
+                        </template>
+                        <template v-else>
+                            <p v-if="slot.items.length === 0" class="text-neutral-500">Nothing worn.</p>
+                            <p v-for="item in slot.items" :key="itemKey(item)" class="text-neutral-300">
+                                {{ item.name }}
+                                <span class="text-neutral-600">{{ item.groupLabel }}</span>
+                                <span v-if="item.lock" class="text-amber-300/80">🔒</span>
+                            </p>
+                        </template>
+                    </div>
                 </div>
             </div>
+        </div>
+
+        <div v-if="snapshots.length" class="card mt-6 p-4">
+            <h2 class="mb-2 text-sm font-semibold text-neutral-400">
+                Snapshots ({{ snapshots.length }})
+            </h2>
+            <ul class="divide-y divide-white/5 text-sm">
+                <li
+                    v-for="snapshot in snapshots"
+                    :key="snapshot.id"
+                    class="flex items-center gap-3 py-1.5"
+                >
+                    <button class="text-neutral-200 hover:underline" @click="source = snapshot.id!">
+                        {{ new Date(snapshot.taken).toLocaleString() }}
+                    </button>
+                    <span class="text-xs text-neutral-600">
+                        {{ snapshot.slots.length }} slots ·
+                        ~{{ (snapshotSize(snapshot) / 1024 / 1024).toFixed(1) }} MB
+                    </span>
+                    <button
+                        class="ml-auto text-xs text-neutral-500 hover:text-rose-300"
+                        @click="deleteSnapshot(snapshot.id)"
+                    >
+                        Delete
+                    </button>
+                </li>
+            </ul>
         </div>
     </div>
 </template>

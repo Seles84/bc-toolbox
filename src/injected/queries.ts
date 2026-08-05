@@ -3,7 +3,7 @@
  * lookups against game state that only exists in the page.
  */
 import type { PageQuery, PageQueryResult, RosterMember, WardrobeSlotInfo } from '@/shared/protocol';
-import { buildProfile, canvasToDataUrl, cropCanvas } from './profile';
+import { buildProfile, buildWornItems, canvasToDataUrl, cropCanvas } from './profile';
 
 export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
     switch (query.type) {
@@ -50,6 +50,7 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
                 index,
                 name: Player.WardrobeCharacterNames?.[index] ?? `Slot ${index + 1}`,
                 image: c?.Canvas ? safeDataUrl(c.Canvas) : undefined,
+                items: c ? (buildWornItems(c) ?? []) : [],
             }));
             return { success: true, data: { slots } };
         }

@@ -171,6 +171,24 @@ export interface BookmarkRecord {
     created: number;
 }
 
+/** One wardrobe slot inside a snapshot. */
+export interface WardrobeSlotSnapshot {
+    index: number;
+    name: string;
+    /** Cropped WebP data-URL preview */
+    image?: string;
+    items: WornItem[];
+}
+
+/** A saved point-in-time copy of a character's wardrobe — `wardrobeSnapshots` table. */
+export interface WardrobeSnapshotRecord {
+    id?: number;
+    /** The character whose wardrobe this is */
+    member: number;
+    taken: number;
+    slots: WardrobeSlotSnapshot[];
+}
+
 /** One login session of one of the player's characters — `playerSessions` table. */
 export interface PlayerSessionRecord {
     id?: number;

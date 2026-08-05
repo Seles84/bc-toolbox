@@ -81,7 +81,7 @@ export function canvasToDataUrl(canvas: HTMLCanvasElement | null): string | unde
  * loaded asset descriptions, so they're human-readable and localized. Body
  * slots (hair, eyes…) and script items are skipped.
  */
-function buildWornItems(character: Character): WornItem[] | undefined {
+export function buildWornItems(character: Character): WornItem[] | undefined {
     try {
         const items: WornItem[] = [];
         for (const item of character.Appearance ?? []) {

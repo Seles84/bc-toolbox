@@ -13,6 +13,7 @@ import type {
     MemberRecord,
     MemberSeenRecord,
     PlayerSessionRecord,
+    WardrobeSnapshotRecord,
 } from './records';
 
 export class BctDatabase extends Dexie {
@@ -24,6 +25,7 @@ export class BctDatabase extends Dexie {
     beeps!: EntityTable<BeepRecord, 'id'>;
     notes!: EntityTable<MemberNoteRecord, 'id'>;
     bookmarks!: EntityTable<BookmarkRecord, 'id'>;
+    wardrobeSnapshots!: EntityTable<WardrobeSnapshotRecord, 'id'>;
 
     constructor() {
         super('bc-toolbox');
@@ -42,6 +44,9 @@ export class BctDatabase extends Dexie {
         });
         this.version(4).stores({
             bookmarks: '++id, &[viewer+chatId], viewer',
+        });
+        this.version(5).stores({
+            wardrobeSnapshots: '++id, member, taken',
         });
     }
 }
