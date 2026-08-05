@@ -13,6 +13,54 @@ import type { OverlayMemberInfo, PageDataRequest } from '@/shared/protocol';
 
 const BUTTON_ID = 'bct-overlay-button';
 const PANEL_ID = 'bct-overlay-panel';
+const STYLE_ID = 'bct-overlay-style';
+
+/**
+ * Visual styles live in a stylesheet so they can reference the CSS variables
+ * the "Themed" mod (ProtoKink/Themed) sets on :root — with Themed active the
+ * button/panel adopt the player's theme; the fallbacks match vanilla BC.
+ */
+const OVERLAY_CSS = `
+#${BUTTON_ID} {
+    position: fixed;
+    z-index: 2147483000;
+    padding: 0;
+    line-height: 1;
+    cursor: pointer;
+    background: var(--tmd-element, #fff);
+    color: var(--tmd-text, #000);
+    border: 2px solid var(--tmd-accent, #000);
+    border-radius: 4px;
+    font-weight: 700;
+    font-family: Arial, sans-serif;
+}
+#${BUTTON_ID}:hover {
+    background: var(--tmd-element-hover, #e0e0e0);
+}
+#${PANEL_ID} {
+    position: fixed;
+    z-index: 2147483000;
+    overflow-y: auto;
+    padding: 12px 14px;
+    border-radius: 10px;
+    background: var(--tmd-main, rgba(18, 18, 18, 0.95));
+    border: 1px solid var(--tmd-accent, rgba(255, 255, 255, 0.15));
+    color: var(--tmd-text, #e5e5e5);
+    font-family: system-ui, sans-serif;
+    font-size: 13px;
+    line-height: 1.45;
+    box-shadow: 0 4px 24px rgba(0, 0, 0, 0.4);
+}
+`;
+
+function ensureStyle(): void {
+    if (!document.getElementById(STYLE_ID)) {
+        const style = document.createElement('style');
+        style.id = STYLE_ID;
+        style.textContent = OVERLAY_CSS;
+        document.head.appendChild(style);
+    }
+}
 
 /** Canvas-space geometry: beside the sheet's button column (Exit is 1815,75). */
 const BTN = { x: 1705, y: 75, w: 90, h: 90 };
@@ -57,23 +105,11 @@ export function initOverlay(mod: ModSDKModAPI, requestData: RequestData): void {
         currentInfo = info;
         currentCharacter = character;
 
+        ensureStyle();
         const button = document.createElement('button');
         button.id = BUTTON_ID;
         button.textContent = 'BCT';
         button.title = 'BC Toolbox — notes and history';
-        button.style.cssText = [
-            'position:fixed',
-            'z-index:2147483000',
-            'background:#fff',
-            'color:#000',
-            'border:2px solid #000',
-            'border-radius:4px',
-            'font-weight:700',
-            'font-family:Arial,sans-serif',
-            'cursor:pointer',
-            'padding:0',
-            'line-height:1',
-        ].join(';');
         button.addEventListener('click', (event) => {
             event.stopPropagation();
             togglePanel();
@@ -167,35 +203,22 @@ function restraintSummary(character: Character): string | undefined {
 }
 
 function buildPanel(info: OverlayMemberInfo, restraints?: string): HTMLDivElement {
+    ensureStyle();
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
-    panel.style.cssText = [
-        'position:fixed',
-        'z-index:2147483000',
-        'overflow-y:auto',
-        'padding:12px 14px',
-        'border-radius:10px',
-        'background:rgba(18,18,18,0.95)',
-        'border:1px solid rgba(255,255,255,0.15)',
-        'color:#e5e5e5',
-        'font-family:system-ui,sans-serif',
-        'font-size:13px',
-        'line-height:1.45',
-        'box-shadow:0 4px 24px rgba(0,0,0,0.4)',
-    ].join(';');
 
     const header = document.createElement('div');
     header.textContent = 'BC TOOLBOX';
     header.style.cssText =
-        'font-size:10px;letter-spacing:0.1em;color:#8b8b8b;margin-bottom:6px;font-weight:600';
+        'font-size:10px;letter-spacing:0.1em;opacity:0.55;margin-bottom:6px;font-weight:600';
     panel.appendChild(header);
 
     if (restraints) {
-        panel.appendChild(line(restraints, '#fda4af'));
+        panel.appendChild(line(restraints, { color: '#fda4af' }));
     }
 
     if (!info.met) {
-        panel.appendChild(line('First time meeting this character.', '#a3a3a3', true));
+        panel.appendChild(line('First time meeting this character.', { muted: 0.7, italic: true }));
         return panel;
     }
 
@@ -214,29 +237,42 @@ function buildPanel(info: OverlayMemberInfo, restraints?: string): HTMLDivElemen
 
     if (info.lastSeen) {
         const seen = `Last seen ${new Date(info.lastSeen).toLocaleDateString()}${info.lastLocation ? ` in ${info.lastLocation}` : ''}`;
-        panel.appendChild(line(seen, '#a3a3a3'));
+        panel.appendChild(line(seen, { muted: 0.75 }));
     }
     if (info.firstSeen) {
-        panel.appendChild(line(`First met ${new Date(info.firstSeen).toLocaleDateString()}`, '#8b8b8b'));
+        panel.appendChild(
+            line(`First met ${new Date(info.firstSeen).toLocaleDateString()}`, { muted: 0.6 }),
+        );
     }
     if (info.previousNames?.length) {
-        panel.appendChild(line(`Previously: ${info.previousNames.join(', ')}`, '#8b8b8b'));
+        panel.appendChild(line(`Previously: ${info.previousNames.join(', ')}`, { muted: 0.6 }));
     }
 
     if (info.note) {
         const note = document.createElement('div');
         note.textContent = info.note.length > 600 ? info.note.slice(0, 600) + '…' : info.note;
         note.style.cssText =
-            'margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.1);white-space:pre-wrap;color:#d4d4d4';
+            'margin-top:6px;padding-top:6px;border-top:1px solid var(--tmd-accent, rgba(255,255,255,0.1));white-space:pre-wrap;opacity:0.9';
         panel.appendChild(note);
     }
 
     return panel;
 }
 
-function line(text: string, color: string, italic = false): HTMLDivElement {
+/** Muted lines inherit the theme's text color at reduced opacity. */
+function line(
+    text: string,
+    options: { color?: string; muted?: number; italic?: boolean } = {},
+): HTMLDivElement {
     const div = document.createElement('div');
     div.textContent = text;
-    div.style.cssText = `color:${color};font-size:12px${italic ? ';font-style:italic' : ''}`;
+    div.style.cssText = [
+        `color:${options.color ?? 'inherit'}`,
+        'font-size:12px',
+        options.muted !== undefined ? `opacity:${options.muted}` : '',
+        options.italic ? 'font-style:italic' : '',
+    ]
+        .filter(Boolean)
+        .join(';');
     return div;
 }
