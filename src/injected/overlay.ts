@@ -39,7 +39,7 @@ export function initOverlay(mod: ModSDKModAPI, requestData: RequestData): void {
         if (CurrentScreen !== 'InformationSheet' || InformationSheetSelection?.MemberNumber !== member) {
             return;
         }
-        document.body.appendChild(buildPanel(info));
+        document.body.appendChild(buildPanel(info, restraintSummary(character)));
     }
 
     mod.hookFunction('InformationSheetLoad', 0, (args, next) => {
@@ -60,7 +60,27 @@ export function initOverlay(mod: ModSDKModAPI, requestData: RequestData): void {
     });
 }
 
-function buildPanel(info: OverlayMemberInfo): HTMLDivElement {
+/** Live restraint count read straight off the inspected character. */
+function restraintSummary(character: Character): string | undefined {
+    try {
+        let restraints = 0;
+        let locked = 0;
+        for (const item of character.Appearance ?? []) {
+            if (item.Asset.Group.Category === 'Item') {
+                restraints++;
+                if (item.Property?.LockedBy) locked++;
+            }
+        }
+        if (restraints === 0) {
+            return 'No restraints';
+        }
+        return `${restraints} restraint${restraints === 1 ? '' : 's'}${locked > 0 ? ` (${locked} locked)` : ''}`;
+    } catch {
+        return undefined;
+    }
+}
+
+function buildPanel(info: OverlayMemberInfo, restraints?: string): HTMLDivElement {
     const panel = document.createElement('div');
     panel.id = PANEL_ID;
     panel.style.cssText = [
@@ -86,6 +106,10 @@ function buildPanel(info: OverlayMemberInfo): HTMLDivElement {
     header.style.cssText =
         'font-size:10px;letter-spacing:0.1em;color:#8b8b8b;margin-bottom:6px;font-weight:600';
     panel.appendChild(header);
+
+    if (restraints) {
+        panel.appendChild(line(restraints, '#fda4af'));
+    }
 
     if (!info.met) {
         panel.appendChild(line('First time meeting this character.', '#a3a3a3', true));

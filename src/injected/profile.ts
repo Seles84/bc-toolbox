@@ -3,6 +3,7 @@
  * PNG of its appearance canvas when one has been drawn.
  */
 import type { CapturedProfile } from '@/shared/protocol';
+import type { WornItem } from '@/shared/records';
 import { decodeDescription } from '@/shared/description';
 
 export function buildProfile(character: Character, withAppearance: boolean): CapturedProfile | null {
@@ -50,6 +51,7 @@ export function buildProfile(character: Character, withAppearance: boolean): Cap
             .filter(([, permission]) => permission?.Permission === 'Favorite')
             .map(([key]) => key),
         addons: collectAddons(character),
+        wornItems: buildWornItems(character),
     };
 
     if (withAppearance && character.Canvas) {
@@ -72,6 +74,39 @@ export function canvasToDataUrl(canvas: HTMLCanvasElement | null): string | unde
     }
     const webp = canvas.toDataURL('image/webp', 0.85);
     return webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/png');
+}
+
+/**
+ * Clothing and restraints currently worn. Item names come from the game's own
+ * loaded asset descriptions, so they're human-readable and localized. Body
+ * slots (hair, eyes…) and script items are skipped.
+ */
+function buildWornItems(character: Character): WornItem[] | undefined {
+    try {
+        const items: WornItem[] = [];
+        for (const item of character.Appearance ?? []) {
+            const group = item.Asset.Group;
+            const restraint = group.Category === 'Item';
+            if (!restraint && !group.Clothing) {
+                continue;
+            }
+            const rawColor = Array.isArray(item.Color) ? item.Color[0] : item.Color;
+            items.push({
+                group: group.Name,
+                groupLabel: group.Description,
+                name: item.Asset.Description,
+                asset: item.Asset.Name,
+                color: rawColor && rawColor !== 'Default' ? rawColor : undefined,
+                lock: item.Property?.LockedBy || undefined,
+                craftName: item.Craft?.Name || undefined,
+                craftedBy: item.Craft?.MemberNumber,
+                restraint,
+            });
+        }
+        return items.length > 0 ? items : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 /**

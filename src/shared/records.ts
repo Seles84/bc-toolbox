@@ -22,6 +22,24 @@ export interface LovershipInfo {
     Start?: number;
 }
 
+/** One worn clothing item or restraint, captured from a character's appearance. */
+export interface WornItem {
+    /** Slot group name, e.g. "ItemArms" */
+    group: string;
+    /** Human slot label, e.g. "Arms" */
+    groupLabel: string;
+    /** Human item name as the game displays it, e.g. "Steel Cuffs" */
+    name: string;
+    /** Technical asset name */
+    asset: string;
+    color?: string;
+    /** Lock asset name when locked, e.g. "ExclusivePadlock" */
+    lock?: string;
+    craftName?: string;
+    craftedBy?: number;
+    restraint: boolean;
+}
+
 /** Captured character profile — the `members` table. Keyed by member number. */
 export interface MemberRecord {
     memberNumber: number;
@@ -52,6 +70,8 @@ export interface MemberRecord {
     favoriteItems?: string[];
     /** Cropped PNG data-URL of the character canvas */
     appearanceImage?: string;
+    /** Clothing + restraints worn at last capture (body slots excluded) */
+    wornItems?: WornItem[];
     /** Detected addons (LSCG/FBC/etc.) as raw blobs */
     addons?: Record<string, unknown>;
     /** Previous names/nicknames, appended whenever a capture changes them */

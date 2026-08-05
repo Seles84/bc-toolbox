@@ -27,7 +27,15 @@ const viewer = computed(() => Number(route.params.viewer));
 const memberNumber = computed(() => Number(route.params.member));
 
 const tab = ref<
-    'stats' | 'bio' | 'crafted' | 'relationships' | 'skills' | 'addons' | 'whispers' | 'notes'
+    | 'stats'
+    | 'bio'
+    | 'wearing'
+    | 'crafted'
+    | 'relationships'
+    | 'skills'
+    | 'addons'
+    | 'whispers'
+    | 'notes'
 >('stats');
 const graphDepth = ref(3);
 const pathQuery = ref('');
@@ -83,6 +91,7 @@ const DEPTHS = [
 const TABS = [
     { id: 'stats', label: 'Stats' },
     { id: 'bio', label: 'Bio' },
+    { id: 'wearing', label: 'Wearing' },
     { id: 'crafted', label: 'Crafted Items' },
     { id: 'relationships', label: 'Relationships' },
     { id: 'skills', label: 'Skills' },
@@ -357,6 +366,13 @@ const lovers = computed(() =>
         .sort((a, b) => (b.Stage ?? 0) - (a.Stage ?? 0) || (a.Start ?? 0) - (b.Start ?? 0)),
 );
 
+const wornClothing = computed(() => (member.value?.wornItems ?? []).filter((i) => !i.restraint));
+const wornRestraints = computed(() => (member.value?.wornItems ?? []).filter((i) => i.restraint));
+
+function lockLabel(lock?: string): string {
+    return lock ? lock.replace('Padlock', ' lock').trim() : '';
+}
+
 interface CraftedItem {
     Item?: string;
     Name?: string;
@@ -555,6 +571,75 @@ const stats = computed(() => {
                     <div v-else-if="tab === 'bio'">
                         <BioText v-if="bio" :text="bio" />
                         <p v-else class="text-sm text-neutral-500">No bio recorded.</p>
+                    </div>
+
+                    <!-- Wearing -->
+                    <div v-else-if="tab === 'wearing'" class="space-y-5">
+                        <p v-if="!member.wornItems?.length" class="text-sm text-neutral-500">
+                            No outfit captured yet — it's recorded when their appearance is, so
+                            meeting them (or Update now while in the same room) fills it in.
+                        </p>
+                        <template v-else>
+                            <p class="text-xs text-neutral-600">
+                                As of {{ new Date(member.capturedAt).toLocaleString() }}
+                            </p>
+                            <section v-if="wornRestraints.length">
+                                <h3 class="mb-2 text-sm font-semibold text-rose-300/80">
+                                    Restraints ({{ wornRestraints.length }})
+                                </h3>
+                                <ul class="space-y-1.5 text-sm">
+                                    <li
+                                        v-for="item in wornRestraints"
+                                        :key="item.group"
+                                        class="flex flex-wrap items-baseline gap-x-2"
+                                    >
+                                        <span class="text-neutral-200">{{ item.name }}</span>
+                                        <span class="text-xs text-neutral-600">{{ item.groupLabel }}</span>
+                                        <span
+                                            v-if="item.lock"
+                                            class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300"
+                                            >🔒 {{ lockLabel(item.lock) }}</span
+                                        >
+                                        <span v-if="item.craftName" class="text-xs text-neutral-500">
+                                            "{{ item.craftName }}"
+                                            <template v-if="item.craftedBy">
+                                                by
+                                                <RouterLink
+                                                    :to="{
+                                                        name: 'member',
+                                                        params: { viewer, member: item.craftedBy },
+                                                    }"
+                                                    class="text-accent-soft hover:underline"
+                                                    >#{{ item.craftedBy }}</RouterLink
+                                                >
+                                            </template>
+                                        </span>
+                                    </li>
+                                </ul>
+                            </section>
+                            <p v-else class="text-sm text-neutral-500">No restraints.</p>
+
+                            <section v-if="wornClothing.length">
+                                <h3 class="mb-2 text-sm font-semibold text-neutral-400">
+                                    Clothing ({{ wornClothing.length }})
+                                </h3>
+                                <ul class="space-y-1.5 text-sm">
+                                    <li
+                                        v-for="item in wornClothing"
+                                        :key="item.group"
+                                        class="flex flex-wrap items-baseline gap-x-2"
+                                    >
+                                        <span
+                                            v-if="item.color?.startsWith('#')"
+                                            class="inline-block h-2.5 w-2.5 self-center rounded-full border border-white/20"
+                                            :style="{ background: item.color }"
+                                        />
+                                        <span class="text-neutral-200">{{ item.name }}</span>
+                                        <span class="text-xs text-neutral-600">{{ item.groupLabel }}</span>
+                                    </li>
+                                </ul>
+                            </section>
+                        </template>
                     </div>
 
                     <!-- Crafted items -->
