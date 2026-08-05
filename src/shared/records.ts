@@ -38,7 +38,8 @@ export interface MemberRecord {
     money?: number;
     difficulty?: number;
     itemPermission?: number;
-    ownership?: OwnershipInfo;
+    /** null = known to be unowned; undefined = never reported */
+    ownership?: OwnershipInfo | null;
     lovership?: LovershipInfo[];
     submissives?: number[];
     friends?: Record<string, string>;
@@ -55,6 +56,12 @@ export interface MemberRecord {
     addons?: Record<string, unknown>;
     /** Previous names/nicknames, appended whenever a capture changes them */
     nameHistory?: { name?: string; nickname?: string; changed: number }[];
+    /** Previous ownership/lovership states, appended whenever a capture changes them */
+    relationshipHistory?: {
+        ownership?: OwnershipInfo | null;
+        lovership?: LovershipInfo[];
+        changed: number;
+    }[];
     /** Last time any of the above was refreshed */
     capturedAt: number;
 }
@@ -133,6 +140,15 @@ export interface MemberNoteRecord {
     note: string;
     tags: string[];
     updated: number;
+}
+
+/** A starred chat line, per viewing character — `bookmarks` table. */
+export interface BookmarkRecord {
+    id?: number;
+    viewer: number;
+    /** The bookmarked chat line's id */
+    chatId: number;
+    created: number;
 }
 
 /** One login session of one of the player's characters — `playerSessions` table. */

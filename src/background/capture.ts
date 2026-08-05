@@ -18,7 +18,7 @@ interface RoomCharacterBundle {
     Description?: string;
     Creation?: number;
     LabelColor?: string;
-    Ownership?: import('@/shared/records').OwnershipInfo;
+    Ownership?: import('@/shared/records').OwnershipInfo | null;
     Lovership?: import('@/shared/records').LovershipInfo[];
     Reputation?: { Type: string; Value: number }[];
 }
@@ -32,6 +32,54 @@ interface ChatRoomSyncData {
 }
 
 const STORED_MESSAGE_TYPES = new Set<string>(CHAT_TYPES);
+
+// -- Keyword alerts ----------------------------------------------------------
+
+let alertKeywords: string[] = [];
+void chrome.storage.local.get('alertKeywords').then((stored) => {
+    alertKeywords = (stored.alertKeywords as string[]) ?? [];
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.alertKeywords) {
+        alertKeywords = (changes.alertKeywords.newValue as string[]) ?? [];
+    }
+});
+
+const KEYWORD_COOLDOWN = 60_000;
+const keywordNotifiedAt = new Map<string, number>();
+
+async function maybeKeywordAlert(state: TabState, line: ChatLinePayload, senderName?: string) {
+    if (alertKeywords.length === 0 || line.sender === state.memberNumber) {
+        return;
+    }
+    const haystack = `${line.rendered ?? ''} ${line.content}`.toLowerCase();
+    const hit = alertKeywords.find((kw) => kw && haystack.includes(kw.toLowerCase()));
+    if (!hit) {
+        return;
+    }
+    // No alert while the user is actively looking at that game tab.
+    try {
+        const tab = await chrome.tabs.get(state.tabId);
+        if (tab.active) {
+            const window = await chrome.windows.get(tab.windowId);
+            if (window.focused) return;
+        }
+    } catch {
+        // Tab lookup failed — alert anyway.
+    }
+    const now = Date.now();
+    if (now - (keywordNotifiedAt.get(hit) ?? 0) < KEYWORD_COOLDOWN) {
+        return;
+    }
+    keywordNotifiedAt.set(hit, now);
+    const excerpt = (line.rendered ?? line.content).slice(0, 120);
+    chrome.notifications.create(`bct-keyword:${state.memberNumber}:${state.channelId}`, {
+        type: 'basic',
+        iconUrl: 'bclub-logo.png',
+        title: `"${hit}" mentioned${senderName ? ` by ${senderName}` : ''}`,
+        message: excerpt,
+    });
+}
 
 export async function handlePageMessage(state: TabState, message: PageMessage): Promise<void> {
     switch (message.kind) {
@@ -397,6 +445,7 @@ async function onChatLine(state: TabState, line: ChatLinePayload, timestamp: num
         created: timestamp,
     });
     await markSeen(state, line.sender, timestamp);
+    await maybeKeywordAlert(state, line, senderName);
 }
 
 async function onRoomLeave(state: TabState, timestamp: number): Promise<void> {
@@ -472,6 +521,27 @@ async function upsertMember(record: Partial<MemberRecord> & { memberNumber: numb
                 defined.nameHistory = history.slice(-20);
             }
         }
+
+        // Same idea for ownership/lovership: when a capture reports a state
+        // that differs from the last KNOWN state, keep the old one with a date.
+        const ownershipChanged =
+            'ownership' in defined &&
+            existing.ownership !== undefined &&
+            ownershipKey(defined.ownership) !== ownershipKey(existing.ownership);
+        const lovershipChanged =
+            defined.lovership !== undefined &&
+            existing.lovership !== undefined &&
+            lovershipKey(defined.lovership) !== lovershipKey(existing.lovership);
+        if (ownershipChanged || lovershipChanged) {
+            const history = existing.relationshipHistory ?? [];
+            history.push({
+                ...(ownershipChanged ? { ownership: existing.ownership } : {}),
+                ...(lovershipChanged ? { lovership: existing.lovership } : {}),
+                changed: Date.now(),
+            });
+            defined.relationshipHistory = history.slice(-20);
+        }
+
         await db.members.update(defined.memberNumber, defined);
     } else {
         await db.members.put({
@@ -481,6 +551,20 @@ async function upsertMember(record: Partial<MemberRecord> & { memberNumber: numb
             ...defined,
         } as MemberRecord);
     }
+}
+
+function ownershipKey(ownership: import('@/shared/records').OwnershipInfo | null | undefined): string {
+    return ownership?.MemberNumber !== undefined
+        ? `${ownership.MemberNumber}:${ownership.Stage ?? 0}`
+        : 'none';
+}
+
+function lovershipKey(lovership: import('@/shared/records').LovershipInfo[] | undefined): string {
+    return (lovership ?? [])
+        .filter((l) => l.MemberNumber !== undefined || l.Name)
+        .map((l) => `${l.MemberNumber ?? l.Name}:${l.Stage ?? 0}`)
+        .sort()
+        .join('|');
 }
 
 async function markSeen(state: TabState, member: number, timestamp: number): Promise<void> {

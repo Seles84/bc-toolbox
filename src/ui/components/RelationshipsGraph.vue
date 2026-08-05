@@ -17,7 +17,11 @@ const props = defineProps<{
     focal: number;
     depth: number;
     viewer: number;
+    /** Highlight the shortest connection from focal to this member */
+    pathTarget?: number;
 }>();
+
+const emit = defineEmits<{ pathResult: [found: boolean | undefined] }>();
 
 const router = useRouter();
 const graph = ref<RelationshipGraph | null>(null);
@@ -27,11 +31,12 @@ const container = ref<HTMLDivElement>();
 const view = ref({ x: 0, y: 0, scale: 1 });
 
 watch(
-    () => [props.focal, props.depth],
+    () => [props.focal, props.depth, props.pathTarget],
     async () => {
         loading.value = true;
         try {
-            graph.value = await buildRelationshipGraph(props.focal, props.depth);
+            graph.value = await buildRelationshipGraph(props.focal, props.depth, props.pathTarget);
+            emit('pathResult', graph.value.pathFound);
             fit();
         } finally {
             loading.value = false;
@@ -156,10 +161,10 @@ function openMember(id: number) {
                         :key="index"
                         :d="edge.path"
                         fill="none"
-                        :stroke="edge.color"
-                        :stroke-width="1.5"
+                        :stroke="edge.onPath ? '#34d399' : edge.color"
+                        :stroke-width="edge.onPath ? 3 : 1.5"
                         :stroke-dasharray="edge.dashed ? '6 4' : undefined"
-                        opacity="0.75"
+                        :opacity="edge.onPath ? 1 : 0.75"
                     />
                     <g
                         v-for="node in positioned.nodes"
@@ -172,9 +177,9 @@ function openMember(id: number) {
                             :width="NODE_W"
                             :height="NODE_H"
                             rx="8"
-                            :fill="node.id === focal ? 'rgba(16,185,129,0.18)' : 'rgba(255,255,255,0.05)'"
-                            :stroke="node.id === focal ? '#34d399' : node.known ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)'"
-                            :stroke-width="node.id === focal ? 2 : 1"
+                            :fill="node.id === focal ? 'rgba(16,185,129,0.18)' : node.onPath ? 'rgba(16,185,129,0.08)' : 'rgba(255,255,255,0.05)'"
+                            :stroke="node.id === focal || node.onPath ? '#34d399' : node.known ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)'"
+                            :stroke-width="node.id === focal || node.onPath ? 2 : 1"
                             :stroke-dasharray="node.known ? undefined : '4 3'"
                         />
                         <text

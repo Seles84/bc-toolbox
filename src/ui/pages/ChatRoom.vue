@@ -5,6 +5,7 @@ import { db } from '@/shared/db';
 import type { ChatChannelRecord, ChatLogRecord, MemberRecord } from '@/shared/records';
 import ChatLine from '../components/ChatLine.vue';
 import { useLiveQuery } from '../composables/useLiveQuery';
+import { downloadText, roomTranscript, safeFilename } from '../utils/transcript';
 
 const route = useRoute();
 const viewer = computed(() => Number(route.params.viewer));
@@ -15,6 +16,28 @@ interface RoomData {
     channel: ChatChannelRecord | null;
     lines: ChatLogRecord[];
     members: Map<number, MemberRecord>;
+}
+
+const bookmarkedIds = useLiveQuery(
+    async () =>
+        new Set(
+            (await db.bookmarks.where('viewer').equals(viewer.value).toArray()).map((b) => b.chatId),
+        ),
+    [viewer],
+    new Set<number>(),
+);
+
+async function toggleBookmark(chatId?: number) {
+    if (chatId === undefined) return;
+    const existing = await db.bookmarks
+        .where('[viewer+chatId]')
+        .equals([viewer.value, chatId])
+        .first();
+    if (existing?.id !== undefined) {
+        await db.bookmarks.delete(existing.id);
+    } else {
+        await db.bookmarks.add({ viewer: viewer.value, chatId, created: Date.now() });
+    }
 }
 
 const room = useLiveQuery<RoomData>(
@@ -68,6 +91,16 @@ watch(
     },
 );
 
+function exportLog() {
+    const c = channel.value;
+    if (!c) return;
+    const header = `${c.roomName} — entered ${new Date(c.entered).toLocaleString()}`;
+    downloadText(
+        `${safeFilename(c.roomName)}-${new Date(c.entered).toISOString().slice(0, 10)}.txt`,
+        roomTranscript(header, visibleLines.value, room.value.members, viewer.value),
+    );
+}
+
 function formatTime(timestamp: number): string {
     return new Date(timestamp).toLocaleTimeString([], { hour: '2-digit', minute: '2-digit' });
 }
@@ -91,10 +124,13 @@ function formatDate(timestamp: number): string {
                 </h1>
                 <p class="text-sm text-neutral-500">Entered {{ formatDate(channel.entered) }}</p>
             </div>
-            <label class="ml-auto flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
-                <input v-model="showWhispers" type="checkbox" class="accent-accent" />
-                Show whispers
-            </label>
+            <div class="ml-auto flex items-center gap-3">
+                <label class="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
+                    <input v-model="showWhispers" type="checkbox" class="accent-accent" />
+                    Show whispers
+                </label>
+                <button class="btn" @click="exportLog">Export</button>
+            </div>
         </div>
 
         <div class="flex flex-col gap-4 lg:flex-row">
@@ -108,7 +144,7 @@ function formatDate(timestamp: number): string {
                 <div
                     v-for="line in visibleLines"
                     :key="line.id"
-                    class="flex gap-3 rounded px-1 py-1 hover:bg-white/[.03]"
+                    class="group flex gap-3 rounded px-1 py-1 hover:bg-white/[.03]"
                 >
                     <span
                         class="w-16 shrink-0 pt-0.5 text-right font-mono text-xs whitespace-nowrap text-neutral-600"
@@ -116,6 +152,18 @@ function formatDate(timestamp: number): string {
                         {{ formatTime(line.created) }}
                     </span>
                     <ChatLine :line="line" :members="room.members" :viewer="viewer" class="min-w-0 flex-1" />
+                    <button
+                        class="shrink-0 self-start px-1 text-sm leading-5"
+                        :class="
+                            bookmarkedIds.has(line.id!)
+                                ? 'text-amber-300'
+                                : 'text-neutral-600 opacity-0 group-hover:opacity-100 hover:text-amber-300'
+                        "
+                        :title="bookmarkedIds.has(line.id!) ? 'Remove bookmark' : 'Bookmark this line'"
+                        @click="toggleBookmark(line.id)"
+                    >
+                        {{ bookmarkedIds.has(line.id!) ? '★' : '☆' }}
+                    </button>
                 </div>
             </div>
 

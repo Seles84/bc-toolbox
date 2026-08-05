@@ -100,10 +100,18 @@ async function dispatch(request: ApiRequest): Promise<ApiResponse> {
 // -- Notification click → open that member's profile -------------------------
 
 chrome.notifications.onClicked.addListener((id) => {
-    const match = id.match(/^bct-friend:(\d+):(\d+)$/);
-    if (match) {
+    const friend = id.match(/^bct-friend:(\d+):(\d+)$/);
+    if (friend) {
         void chrome.tabs.create({
-            url: chrome.runtime.getURL(`index.html#/c/${match[1]}/members/${match[2]}`),
+            url: chrome.runtime.getURL(`index.html#/c/${friend[1]}/members/${friend[2]}`),
+        });
+        void chrome.notifications.clear(id);
+        return;
+    }
+    const keyword = id.match(/^bct-keyword:(\d+):(\d+)$/);
+    if (keyword) {
+        void chrome.tabs.create({
+            url: chrome.runtime.getURL(`index.html#/c/${keyword[1]}/chats/${keyword[2]}`),
         });
         void chrome.notifications.clear(id);
     }

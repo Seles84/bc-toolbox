@@ -10,6 +10,7 @@ import { PRESET_TAGS, tagClass } from '../utils/tags';
 import { api } from '../api';
 import { useSessionStore } from '../stores/session';
 import { decodeDescription } from '@/shared/description';
+import { downloadText, safeFilename } from '../utils/transcript';
 import {
     collarStateLabel,
     daysSince,
@@ -29,6 +30,39 @@ const tab = ref<
     'stats' | 'bio' | 'crafted' | 'relationships' | 'skills' | 'addons' | 'whispers' | 'notes'
 >('stats');
 const graphDepth = ref(3);
+const pathQuery = ref('');
+const pathTarget = ref<number | undefined>(undefined);
+const pathFound = ref<boolean | undefined>(undefined);
+
+/** Resolve the find-connection input: a member number, or a name lookup. */
+async function findConnection() {
+    pathFound.value = undefined;
+    const query = pathQuery.value.trim();
+    if (!query) {
+        pathTarget.value = undefined;
+        return;
+    }
+    if (/^\d+$/.test(query)) {
+        pathTarget.value = Number(query);
+        return;
+    }
+    const q = query.toLowerCase();
+    const match = await db.members
+        .filter(
+            (m) =>
+                m.name.toLowerCase() === q ||
+                (m.nickname ?? '').toLowerCase() === q ||
+                m.name.toLowerCase().includes(q) ||
+                (m.nickname ?? '').toLowerCase().includes(q),
+        )
+        .first();
+    if (match) {
+        pathTarget.value = match.memberNumber;
+    } else {
+        pathTarget.value = undefined;
+        pathFound.value = false;
+    }
+}
 
 const DEPTHS = [
     { label: 'Direct family', value: 1 },
@@ -190,6 +224,20 @@ async function sendWhisper() {
     }
 }
 
+function exportWhispers() {
+    const name = member.value ? member.value.nickname || member.value.name : `#${memberNumber.value}`;
+    const lines = whispers.value.map((entry) => {
+        const time = new Date(entry.line.created).toLocaleString();
+        const from = entry.line.sender === viewer.value ? 'You' : name;
+        const room = entry.roomName ? ` (${entry.roomName})` : '';
+        return `[${time}]${room} ${from}: ${entry.line.message}`;
+    });
+    downloadText(
+        `whispers-${safeFilename(name)}.txt`,
+        [`Whispers with ${name} (#${memberNumber.value})`, '', ...lines].join('\n'),
+    );
+}
+
 // -- Notes & tags ------------------------------------------------------------
 
 const savedNote = useLiveQuery(
@@ -268,6 +316,30 @@ const bio = computed(() => decodeDescription(member.value?.description));
 const dominance = computed(() => dominanceInfo(member.value));
 const pronouns = computed(() => pronounsInfo(member.value?.pronouns));
 const ownership = computed(() => member.value?.ownership ?? null);
+
+/** Past ownership/lovership states, newest first, as display strings. */
+const relationshipHistory = computed(() =>
+    [...(member.value?.relationshipHistory ?? [])].reverse().map((entry) => {
+        const parts: string[] = [];
+        if ('ownership' in entry) {
+            parts.push(
+                entry.ownership?.MemberNumber
+                    ? `${collarStateLabel(entry.ownership.Stage)} by ${entry.ownership.Name ?? `#${entry.ownership.MemberNumber}`}`
+                    : 'unowned',
+            );
+        }
+        if (entry.lovership) {
+            const names = entry.lovership
+                .filter((l) => l.Name || l.MemberNumber)
+                .map(
+                    (l) =>
+                        `${l.Name ?? `#${l.MemberNumber}`} (${loverStateLabel(l.Stage)})`,
+                );
+            parts.push(names.length ? `lovers: ${names.join(', ')}` : 'no lovers');
+        }
+        return { changed: entry.changed, text: parts.join(' · ') };
+    }),
+);
 
 const lovers = computed(() =>
     [...(member.value?.lovership ?? [])]
@@ -617,8 +689,20 @@ const stats = computed(() => {
                             No known relationships.
                         </p>
 
+                        <section v-if="relationshipHistory.length">
+                            <h3 class="mb-2 text-sm font-semibold text-neutral-400">History</h3>
+                            <ul class="space-y-1 text-sm">
+                                <li v-for="(entry, index) in relationshipHistory" :key="index">
+                                    <span class="text-neutral-500"
+                                        >Until {{ formatDay(entry.changed) }}:</span
+                                    >
+                                    <span class="text-neutral-300"> {{ entry.text }}</span>
+                                </li>
+                            </ul>
+                        </section>
+
                         <section>
-                            <div class="mb-2 flex items-center gap-3">
+                            <div class="mb-2 flex flex-wrap items-center gap-3">
                                 <h3 class="text-sm font-semibold text-neutral-400">Family graph</h3>
                                 <select
                                     v-model.number="graphDepth"
@@ -628,11 +712,27 @@ const stats = computed(() => {
                                         {{ d.label }}
                                     </option>
                                 </select>
+                                <form
+                                    class="flex items-center gap-1.5"
+                                    @submit.prevent="findConnection"
+                                >
+                                    <input
+                                        v-model="pathQuery"
+                                        class="input w-44 py-1 text-xs"
+                                        placeholder="Connection to… (name or #)"
+                                    />
+                                    <button type="submit" class="btn px-2 py-1 text-xs">Find</button>
+                                </form>
+                                <span v-if="pathFound === false" class="text-xs text-amber-400">
+                                    No known connection
+                                </span>
                             </div>
                             <RelationshipsGraph
                                 :focal="memberNumber"
                                 :depth="graphDepth"
                                 :viewer="viewer"
+                                :path-target="pathTarget"
+                                @path-result="pathFound = $event"
                             />
                         </section>
                     </div>
@@ -661,7 +761,12 @@ const stats = computed(() => {
                         <p v-if="whispers.length === 0" class="text-sm text-neutral-500">
                             No whispers recorded with this member.
                         </p>
-                        <div v-else class="max-h-[60vh] space-y-1.5 overflow-y-auto pr-1">
+                        <div v-else class="mb-2 flex justify-end">
+                            <button class="btn px-2 py-0.5 text-xs" @click="exportWhispers">
+                                Export thread
+                            </button>
+                        </div>
+                        <div v-if="whispers.length" class="max-h-[60vh] space-y-1.5 overflow-y-auto pr-1">
                             <template v-for="entry in whispers" :key="entry.line.id">
                                 <p
                                     v-if="entry.divider"

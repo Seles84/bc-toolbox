@@ -33,6 +33,8 @@ export interface GraphNode {
     color?: string;
     /** Captured in the database (false = placeholder from relationship info) */
     known: boolean;
+    /** On the highlighted focal→target path */
+    onPath?: boolean;
     x: number;
     y: number;
 }
@@ -42,6 +44,8 @@ export interface GraphEdge {
     to: number;
     type: 'owns' | 'loves';
     stage: number;
+    /** On the highlighted focal→target path */
+    onPath?: boolean;
 }
 
 export interface RelationshipGraph {
@@ -50,9 +54,15 @@ export interface RelationshipGraph {
     width: number;
     height: number;
     truncated: boolean;
+    /** Set when a pathTarget was requested: whether a connection exists */
+    pathFound?: boolean;
 }
 
-export async function buildRelationshipGraph(focal: number, maxDepth: number): Promise<RelationshipGraph> {
+export async function buildRelationshipGraph(
+    focal: number,
+    maxDepth: number,
+    pathTarget?: number,
+): Promise<RelationshipGraph> {
     // Slim in-memory view of every captured member (drop images etc.).
     const byId = new Map<number, SlimMember>();
     const subsByOwner = new Map<number, number[]>();
@@ -138,6 +148,36 @@ export async function buildRelationshipGraph(focal: number, maxDepth: number): P
         frontier = next;
     }
 
+    // Shortest connection focal → pathTarget over the FULL network (not just
+    // the depth-limited neighbourhood); its nodes/edges are always included.
+    let pathFound: boolean | undefined;
+    const pathNodes = new Set<number>();
+    if (pathTarget !== undefined && pathTarget !== focal) {
+        const path = findPath(focal, pathTarget, byId, subsByOwner);
+        pathFound = path !== null;
+        if (path) {
+            for (const id of path) {
+                pathNodes.add(id);
+                included.add(id);
+            }
+            for (let i = 0; i < path.length - 1; i++) {
+                const a = path[i]!;
+                const b = path[i + 1]!;
+                if (byId.get(b)?.ownerId === a) {
+                    addEdge('owns', a, b, byId.get(b)?.ownerStage ?? 0);
+                } else if (byId.get(a)?.ownerId === b) {
+                    addEdge('owns', b, a, byId.get(a)?.ownerStage ?? 0);
+                } else {
+                    const stage =
+                        byId.get(a)?.lovers.find((l) => l.id === b)?.stage ??
+                        byId.get(b)?.lovers.find((l) => l.id === a)?.stage ??
+                        0;
+                    addEdge('loves', a, b, stage);
+                }
+            }
+        }
+    }
+
     // Materialize nodes.
     const nodes = new Map<number, GraphNode>();
     for (const id of included) {
@@ -158,6 +198,19 @@ export async function buildRelationshipGraph(focal: number, maxDepth: number): P
     // Drop owns-edges whose endpoints didn't make it in (node cap).
     const edgeList = [...edges.values()].filter((e) => nodes.has(e.from) && nodes.has(e.to));
 
+    // Flag the path for highlighting.
+    if (pathNodes.size > 0) {
+        for (const id of pathNodes) {
+            const node = nodes.get(id);
+            if (node) node.onPath = true;
+        }
+        for (const edge of edgeList) {
+            if (pathNodes.has(edge.from) && pathNodes.has(edge.to)) {
+                edge.onPath = true;
+            }
+        }
+    }
+
     layout(nodes, edgeList);
 
     let width = 0;
@@ -167,7 +220,50 @@ export async function buildRelationshipGraph(focal: number, maxDepth: number): P
         height = Math.max(height, node.y + NODE_H);
     }
 
-    return { nodes: [...nodes.values()], edges: edgeList, width, height, truncated };
+    return { nodes: [...nodes.values()], edges: edgeList, width, height, truncated, pathFound };
+}
+
+/** BFS shortest path over the full owner/lover network; null when unconnected. */
+function findPath(
+    from: number,
+    to: number,
+    byId: Map<number, SlimMember>,
+    subsByOwner: Map<number, number[]>,
+): number[] | null {
+    const parent = new Map<number, number>();
+    const visited = new Set<number>([from]);
+    let frontier = [from];
+    let explored = 0;
+
+    while (frontier.length > 0 && explored < 20_000) {
+        const next: number[] = [];
+        for (const id of frontier) {
+            explored++;
+            const member = byId.get(id);
+            const neighbors = [
+                ...(member?.ownerId !== undefined ? [member.ownerId] : []),
+                ...(subsByOwner.get(id) ?? []),
+                ...(member?.lovers.map((l) => l.id).filter((n): n is number => n !== undefined) ?? []),
+            ];
+            for (const neighbor of neighbors) {
+                if (visited.has(neighbor)) continue;
+                visited.add(neighbor);
+                parent.set(neighbor, id);
+                if (neighbor === to) {
+                    const path = [to];
+                    let cursor = to;
+                    while (cursor !== from) {
+                        cursor = parent.get(cursor)!;
+                        path.unshift(cursor);
+                    }
+                    return path;
+                }
+                next.push(neighbor);
+            }
+        }
+        frontier = next;
+    }
+    return null;
 }
 
 /** Tidy-tree layout over the ownership forest; lover-only nodes are roots. */

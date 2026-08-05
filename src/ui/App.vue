@@ -72,6 +72,13 @@ onUnmounted(() => clearInterval(poll));
                         Friends
                     </RouterLink>
                     <RouterLink
+                        :to="{ name: 'watchlist', params: { viewer: session.viewer } }"
+                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
+                        active-class="!text-white bg-white/10"
+                    >
+                        Watchlist
+                    </RouterLink>
+                    <RouterLink
                         :to="{ name: 'wardrobe', params: { viewer: session.viewer } }"
                         class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
                         active-class="!text-white bg-white/10"
@@ -84,6 +91,14 @@ onUnmounted(() => clearInterval(poll));
                         active-class="!text-white bg-white/10"
                     >
                         Search
+                    </RouterLink>
+                    <RouterLink
+                        :to="{ name: 'bookmarks', params: { viewer: session.viewer } }"
+                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
+                        active-class="!text-white bg-white/10"
+                        title="Bookmarked messages"
+                    >
+                        ★
                     </RouterLink>
                 </nav>
 

@@ -58,6 +58,34 @@ watch(
     { deep: true },
 );
 
+// -- Keyword alerts ----------------------------------------------------------
+
+const keywords = ref<string[]>([]);
+const newKeyword = ref('');
+let keywordsLoaded = false;
+
+watch(
+    keywords,
+    () => {
+        if (keywordsLoaded) {
+            void chrome.storage.local.set({ alertKeywords: [...keywords.value] });
+        }
+    },
+    { deep: true },
+);
+
+function addKeyword() {
+    const kw = newKeyword.value.trim();
+    if (kw && !keywords.value.some((k) => k.toLowerCase() === kw.toLowerCase())) {
+        keywords.value.push(kw);
+    }
+    newKeyword.value = '';
+}
+
+function removeKeyword(kw: string) {
+    keywords.value = keywords.value.filter((k) => k !== kw);
+}
+
 // -- Retention pruning -------------------------------------------------------
 
 const pruneMonths = ref(6);
@@ -263,10 +291,12 @@ onMounted(async () => {
     } catch {
         version.value = 'background unreachable';
     }
-    const stored = await chrome.storage.local.get(['autoBackup', 'lastAutoBackup']);
+    const stored = await chrome.storage.local.get(['autoBackup', 'lastAutoBackup', 'alertKeywords']);
     backup.value = { ...backup.value, ...((stored.autoBackup as Partial<BackupSettings>) ?? {}) };
     lastAutoBackup.value = (stored.lastAutoBackup as number) ?? null;
     backupLoaded = true;
+    keywords.value = (stored.alertKeywords as string[]) ?? [];
+    keywordsLoaded = true;
     await refreshCounts();
     await refreshImageStats();
 });
@@ -426,6 +456,30 @@ async function applyImport() {
                 <button class="btn" :disabled="measuring" @click="measureTables">
                     {{ measuring ? 'Measuring…' : 'Measure table sizes' }}
                 </button>
+            </div>
+        </div>
+
+        <div class="card mb-4 p-5">
+            <h2 class="mb-1 font-medium text-white">Keyword alerts</h2>
+            <p class="mb-3 text-sm text-neutral-500">
+                Desktop notification when any of these appear in captured chat (except your own
+                messages) while the game tab isn't focused.
+            </p>
+            <div class="flex flex-wrap items-center gap-1.5">
+                <span
+                    v-for="kw in keywords"
+                    :key="kw"
+                    class="flex items-center gap-1 rounded bg-surface-2 px-2 py-0.5 text-xs text-neutral-200"
+                >
+                    {{ kw }}
+                    <button class="text-neutral-500 hover:text-white" @click="removeKeyword(kw)">×</button>
+                </span>
+                <input
+                    v-model="newKeyword"
+                    class="input w-40 py-0.5 text-xs"
+                    placeholder="Add keyword…"
+                    @keydown.enter.prevent="addKeyword"
+                />
             </div>
         </div>
 

@@ -21,6 +21,16 @@ export const router = createRouter({
                 { path: 'beeps', name: 'beeps', component: () => import('./pages/Beeps.vue') },
                 { path: 'search', name: 'search', component: () => import('./pages/Search.vue') },
                 {
+                    path: 'watchlist',
+                    name: 'watchlist',
+                    component: () => import('./pages/Watchlist.vue'),
+                },
+                {
+                    path: 'bookmarks',
+                    name: 'bookmarks',
+                    component: () => import('./pages/Bookmarks.vue'),
+                },
+                {
                     path: 'chats/:channel(\\d+)',
                     name: 'chatroom',
                     component: () => import('./pages/ChatRoom.vue'),

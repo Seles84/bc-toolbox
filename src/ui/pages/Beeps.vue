@@ -11,6 +11,7 @@ import type { BeepRecord } from '@/shared/records';
 import { useLiveQuery } from '../composables/useLiveQuery';
 import { api } from '../api';
 import { useSessionStore } from '../stores/session';
+import { downloadText, safeFilename } from '../utils/transcript';
 
 const route = useRoute();
 const session = useSessionStore();
@@ -91,6 +92,19 @@ const selectedName = computed(
               ? `#${selected.value}`
               : ''),
 );
+
+function exportThread() {
+    if (!selected.value) return;
+    const lines = thread.value.map(({ beep, display }) => {
+        const time = new Date(beep.created).toLocaleString();
+        const from = beep.direction === 'out' ? 'You' : selectedName.value;
+        return `[${time}] ${from}: ${display.text ?? '(beep)'}`;
+    });
+    downloadText(
+        `beeps-${safeFilename(selectedName.value)}.txt`,
+        [`Beeps with ${selectedName.value} (#${selected.value})`, '', ...lines].join('\n'),
+    );
+}
 
 // -- Sending -----------------------------------------------------------------
 
@@ -178,6 +192,13 @@ function formatTime(timestamp: number): string {
             <div class="card min-w-0 flex-1 p-4">
                 <div class="mb-3 flex items-baseline gap-2 border-b border-white/10 pb-2">
                     <h2 class="font-medium text-white">{{ selectedName }}</h2>
+                    <button
+                        v-if="thread.length"
+                        class="btn ml-auto px-2 py-0.5 text-xs"
+                        @click="exportThread"
+                    >
+                        Export
+                    </button>
                     <RouterLink
                         v-if="selected"
                         :to="{ name: 'member', params: { viewer, member: selected } }"

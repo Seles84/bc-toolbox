@@ -5,7 +5,7 @@ import { db } from '@/shared/db';
 import type { MemberRecord, MemberSeenRecord } from '@/shared/records';
 import { useLiveQuery } from '../composables/useLiveQuery';
 import { useSessionStore } from '../stores/session';
-import { tagClass } from '../utils/tags';
+import { PRESET_TAGS, tagClass } from '../utils/tags';
 
 const PAGE_SIZE = 48;
 
@@ -83,6 +83,68 @@ watch(pages, (value) => {
 function formatDate(timestamp?: number): string {
     return timestamp ? new Date(timestamp).toLocaleDateString() : '—';
 }
+
+// -- Bulk tagging ------------------------------------------------------------
+
+const selectMode = ref(false);
+const selected = ref(new Set<number>());
+const bulkTag = ref(PRESET_TAGS[0].tag);
+const bulkBusy = ref(false);
+const bulkStatus = ref<string | null>(null);
+
+const bulkTagOptions = computed(() => [
+    ...new Set([...PRESET_TAGS.map((p) => p.tag), ...data.value.allTags]),
+]);
+
+function toggleSelectMode() {
+    selectMode.value = !selectMode.value;
+    selected.value = new Set();
+    bulkStatus.value = null;
+}
+
+function onCardClick(event: MouseEvent, memberNumber: number) {
+    if (!selectMode.value) return;
+    event.preventDefault();
+    const next = new Set(selected.value);
+    if (next.has(memberNumber)) {
+        next.delete(memberNumber);
+    } else {
+        next.add(memberNumber);
+    }
+    selected.value = next;
+}
+
+async function bulkApply(remove: boolean) {
+    if (selected.value.size === 0 || !bulkTag.value) return;
+    bulkBusy.value = true;
+    try {
+        const tag = bulkTag.value;
+        for (const member of selected.value) {
+            const note = await db.notes.where('[member+viewer]').equals([member, viewer.value]).first();
+            const tags = note?.tags ?? [];
+            const has = tags.some((t) => t.toLowerCase() === tag.toLowerCase());
+            if (remove && has) {
+                const nextTags = tags.filter((t) => t.toLowerCase() !== tag.toLowerCase());
+                await db.notes.update(note!.id!, { tags: nextTags, updated: Date.now() });
+            } else if (!remove && !has) {
+                if (note?.id !== undefined) {
+                    await db.notes.update(note.id, { tags: [...tags, tag], updated: Date.now() });
+                } else {
+                    await db.notes.add({
+                        member,
+                        viewer: viewer.value,
+                        note: '',
+                        tags: [tag],
+                        updated: Date.now(),
+                    });
+                }
+            }
+        }
+        bulkStatus.value = `${remove ? 'Removed' : 'Applied'} "${tag}" ${remove ? 'from' : 'to'} ${selected.value.size} members.`;
+    } finally {
+        bulkBusy.value = false;
+    }
+}
 </script>
 
 <template>
@@ -96,7 +158,31 @@ function formatDate(timestamp?: number): string {
                     <option v-for="tag in data.allTags" :key="tag" :value="tag">{{ tag }}</option>
                 </select>
                 <input v-model="search" class="input max-w-xs" placeholder="Search name or ID…" />
+                <button class="btn" :class="selectMode ? 'btn-accent' : ''" @click="toggleSelectMode">
+                    {{ selectMode ? 'Done' : 'Select' }}
+                </button>
             </div>
+        </div>
+
+        <div
+            v-if="selectMode"
+            class="card mb-4 flex flex-wrap items-center gap-3 p-3 text-sm"
+        >
+            <span class="text-neutral-400">{{ selected.size }} selected</span>
+            <select v-model="bulkTag" class="input w-auto py-1">
+                <option v-for="tag in bulkTagOptions" :key="tag" :value="tag">{{ tag }}</option>
+            </select>
+            <button
+                class="btn btn-accent"
+                :disabled="bulkBusy || selected.size === 0"
+                @click="bulkApply(false)"
+            >
+                Apply tag
+            </button>
+            <button class="btn" :disabled="bulkBusy || selected.size === 0" @click="bulkApply(true)">
+                Remove tag
+            </button>
+            <span v-if="bulkStatus" class="text-emerald-400">{{ bulkStatus }}</span>
         </div>
 
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
@@ -104,8 +190,20 @@ function formatDate(timestamp?: number): string {
                 v-for="member in data.rows"
                 :key="member.memberNumber"
                 :to="{ name: 'member', params: { viewer, member: member.memberNumber } }"
-                class="card group overflow-hidden transition-transform hover:-translate-y-0.5 hover:border-accent-soft/40"
+                class="card group relative overflow-hidden transition-transform hover:-translate-y-0.5 hover:border-accent-soft/40"
+                :class="selectMode && selected.has(member.memberNumber) ? '!border-accent' : ''"
+                @click="onCardClick($event, member.memberNumber)"
             >
+                <span
+                    v-if="selectMode"
+                    class="absolute top-2 right-2 z-10 flex h-5 w-5 items-center justify-center rounded border text-xs"
+                    :class="
+                        selected.has(member.memberNumber)
+                            ? 'border-accent bg-accent text-white'
+                            : 'border-white/30 bg-surface/70 text-transparent'
+                    "
+                    >✓</span
+                >
                 <div class="flex h-44 items-center justify-center bg-surface-2/60 p-2">
                     <img
                         v-if="member.appearanceImage"

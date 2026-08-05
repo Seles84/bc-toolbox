@@ -34,7 +34,9 @@ export function buildProfile(character: Character, withAppearance: boolean): Cap
         difficulty: character.GetDifficulty(),
         // R117+ renamed the old numeric ItemPermission to AllowedInteractions
         itemPermission: character.AllowedInteractions,
-        ownership: sanitize(character.Ownership) ?? undefined,
+        // null (not undefined) when the character is verifiably unowned, so
+        // the background can record a release in the relationship history.
+        ownership: character.Ownership ? sanitize(character.Ownership) : null,
         lovership: sanitize(character.Lovership),
         submissives: character.IsPlayer() ? [...(Player.SubmissivesList ?? [])] : undefined,
         friends,
