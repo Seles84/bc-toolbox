@@ -81,7 +81,7 @@ function boot() {
         name: 'BCToolbox',
         fullName: 'BC Toolbox',
         version: __BCT_VERSION__,
-        repository: 'https://github.com/seles84/bc-toolbox',
+        repository: 'https://github.com/Seles84/bc-toolbox',
     });
 
     const appearanceSentAt = new Map<number, number>();
