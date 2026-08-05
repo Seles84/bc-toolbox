@@ -8,9 +8,11 @@ import { useRoute } from 'vue-router';
 import { db } from '@/shared/db';
 import type { WardrobeSlotSnapshot, WardrobeSnapshotRecord, WornItem } from '@/shared/records';
 import type { WardrobeSlotInfo } from '@/shared/protocol';
+import lz from 'lz-string';
 import { api } from '../api';
 import { useLiveQuery } from '../composables/useLiveQuery';
 import { useSessionStore } from '../stores/session';
+import { downloadText, safeFilename } from '../utils/transcript';
 
 const route = useRoute();
 const session = useSessionStore();
@@ -208,6 +210,137 @@ async function clearSlot(slot: DisplaySlot) {
     }
 }
 
+// -- Rearrange / outfit codes ------------------------------------------------
+
+const rearranging = ref(false);
+const swapFirst = ref<number | null>(null);
+const copiedSlot = ref<number | null>(null);
+const importingSlot = ref<number | null>(null);
+const importValue = ref('');
+
+function toggleRearrange() {
+    rearranging.value = !rearranging.value;
+    swapFirst.value = null;
+}
+
+async function onSlotClick(slot: DisplaySlot) {
+    if (!rearranging.value) {
+        expanded.value = expanded.value === slot.index ? null : slot.index;
+        return;
+    }
+    if (swapFirst.value === null) {
+        swapFirst.value = slot.index;
+        return;
+    }
+    if (swapFirst.value === slot.index) {
+        swapFirst.value = null;
+        return;
+    }
+    const a = swapFirst.value;
+    swapFirst.value = null;
+    actionBusy.value = true;
+    actionError.value = null;
+    try {
+        const result = await api('page.query', {
+            memberNumber: viewer.value,
+            query: { type: 'wardrobe-swap', a, b: slot.index },
+        });
+        if (result.success) {
+            await loadLive();
+        } else {
+            actionError.value = result.error;
+        }
+    } finally {
+        actionBusy.value = false;
+    }
+}
+
+async function copyOutfitCode(slot: DisplaySlot) {
+    actionError.value = null;
+    try {
+        const result = await api('page.query', {
+            memberNumber: viewer.value,
+            query: { type: 'wardrobe-get-bundles', slot: slot.index },
+        });
+        if (!result.success) {
+            actionError.value = result.error;
+            return;
+        }
+        await navigator.clipboard.writeText(lz.compressToBase64(JSON.stringify(result.data)));
+        copiedSlot.value = slot.index;
+        setTimeout(() => {
+            if (copiedSlot.value === slot.index) copiedSlot.value = null;
+        }, 2_000);
+    } catch (e) {
+        actionError.value = e instanceof Error ? e.message : String(e);
+    }
+}
+
+/** Outfit codes come as LZString base64 (community format) or plain JSON. */
+function decodeOutfitCode(code: string): unknown[] | null {
+    const trimmed = code.trim();
+    for (const attempt of [
+        () => JSON.parse(trimmed) as unknown,
+        () => JSON.parse(lz.decompressFromBase64(trimmed) || '') as unknown,
+    ]) {
+        try {
+            const parsed = attempt();
+            if (Array.isArray(parsed)) return parsed;
+        } catch {
+            // try the next format
+        }
+    }
+    return null;
+}
+
+async function applyImport(slot: DisplaySlot) {
+    const bundles = decodeOutfitCode(importValue.value);
+    if (!bundles) {
+        actionError.value = 'Not a recognizable outfit code';
+        return;
+    }
+    actionBusy.value = true;
+    actionError.value = null;
+    try {
+        const result = await api('page.query', {
+            memberNumber: viewer.value,
+            query: { type: 'wardrobe-set-bundles', slot: slot.index, bundles },
+        });
+        if (result.success) {
+            importingSlot.value = null;
+            importValue.value = '';
+            await loadLive();
+        } else {
+            actionError.value = result.error;
+        }
+    } finally {
+        actionBusy.value = false;
+    }
+}
+
+async function exportAll() {
+    actionError.value = null;
+    const result = await api('page.query', {
+        memberNumber: viewer.value,
+        query: { type: 'wardrobe-all-bundles' },
+    });
+    if (!result.success) {
+        actionError.value = result.error;
+        return;
+    }
+    const payload = {
+        format: 'bc-toolbox-wardrobe',
+        version: 1,
+        member: viewer.value,
+        taken: Date.now(),
+        ...(result.data as object),
+    };
+    downloadText(
+        `wardrobe-${safeFilename(session.viewerName ?? String(viewer.value))}-${new Date().toISOString().slice(0, 10)}.json`,
+        JSON.stringify(payload, null, 2),
+    );
+}
+
 // -- Diffing -----------------------------------------------------------------
 
 function itemKey(item: WornItem): string {
@@ -285,6 +418,15 @@ const changedCount = computed(
             </span>
 
             <div class="ml-auto flex items-center gap-2">
+                <button
+                    v-if="canEdit"
+                    class="btn"
+                    :class="rearranging ? 'btn-accent' : ''"
+                    @click="toggleRearrange"
+                >
+                    {{ rearranging ? 'Done rearranging' : 'Rearrange' }}
+                </button>
+                <button v-if="canEdit" class="btn" @click="exportAll">Export all</button>
                 <button class="btn" :disabled="loading" @click="loadLive">
                     {{ loading ? 'Loading…' : 'Refresh live' }}
                 </button>
@@ -301,6 +443,10 @@ const changedCount = computed(
         </div>
 
         <p v-if="error" class="mb-4 text-sm text-amber-400">{{ error }}</p>
+        <p v-if="rearranging" class="mb-4 text-sm text-accent-soft">
+            Rearrange mode: click one slot, then another, to swap them.
+            <template v-if="swapFirst !== null"> First slot: {{ swapFirst + 1 }} — pick the second.</template>
+        </p>
         <p v-if="(shownSlots?.length ?? 0) > 96" class="mb-4 text-xs text-neutral-600">
             Slots 97+ (WCE local wardrobe) are captured with item lists but no preview images, to
             keep captures fast and snapshots small.
@@ -321,8 +467,11 @@ const changedCount = computed(
                 v-for="slot in shownSlots"
                 :key="slot.index"
                 class="card cursor-pointer overflow-hidden"
-                :class="diffs?.get(slot.index)?.changed ? 'border-amber-500/50' : ''"
-                @click="expanded = expanded === slot.index ? null : slot.index"
+                :class="[
+                    diffs?.get(slot.index)?.changed ? 'border-amber-500/50' : '',
+                    rearranging && swapFirst === slot.index ? '!border-accent ring-1 ring-accent' : '',
+                ]"
+                @click="onSlotClick(slot)"
             >
                 <div class="flex h-52 items-center justify-center bg-surface-2/60 p-2">
                     <img v-if="slot.image" :src="slot.image" alt="" class="h-full object-contain" />
@@ -363,12 +512,51 @@ const changedCount = computed(
                                 ✕
                             </button>
                         </form>
-                        <div v-else class="flex items-center gap-2">
+                        <form
+                            v-else-if="importingSlot === slot.index"
+                            class="flex flex-col gap-1"
+                            @submit.prevent="applyImport(slot)"
+                        >
+                            <input
+                                v-model="importValue"
+                                class="input px-1.5 py-0.5 text-xs"
+                                placeholder="Paste outfit code…"
+                            />
+                            <div class="flex gap-1">
+                                <button type="submit" class="btn px-1.5 py-0.5 text-[10px]" :disabled="actionBusy">
+                                    Replace slot
+                                </button>
+                                <button
+                                    type="button"
+                                    class="btn px-1.5 py-0.5 text-[10px]"
+                                    @click="importingSlot = null"
+                                >
+                                    ✕
+                                </button>
+                            </div>
+                        </form>
+                        <div v-else class="flex flex-wrap items-center gap-x-2 gap-y-0.5">
                             <button
                                 class="text-[11px] text-neutral-500 hover:text-white"
                                 @click="startRename(slot)"
                             >
                                 Rename
+                            </button>
+                            <button
+                                class="text-[11px] text-neutral-500 hover:text-white"
+                                @click="copyOutfitCode(slot)"
+                            >
+                                {{ copiedSlot === slot.index ? 'Copied!' : 'Copy code' }}
+                            </button>
+                            <button
+                                class="text-[11px] text-neutral-500 hover:text-white"
+                                @click="
+                                    importingSlot = slot.index;
+                                    importValue = '';
+                                    confirmClearSlot = null;
+                                "
+                            >
+                                Import
                             </button>
                             <button
                                 class="text-[11px]"
@@ -384,7 +572,12 @@ const changedCount = computed(
                             </button>
                         </div>
                         <p
-                            v-if="actionError && (renamingSlot === slot.index || confirmClearSlot === slot.index)"
+                            v-if="
+                                actionError &&
+                                (renamingSlot === slot.index ||
+                                    confirmClearSlot === slot.index ||
+                                    importingSlot === slot.index)
+                            "
                             class="mt-1 text-[10px] text-red-400"
                         >
                             {{ actionError }}

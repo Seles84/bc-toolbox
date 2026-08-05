@@ -107,12 +107,9 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
             if (query.slot < 0 || query.slot >= (Player.WardrobeCharacterNames?.length ?? 0)) {
                 return { success: false, error: 'No such wardrobe slot' };
             }
-            // Set without the game's full-array push, then sync only the
-            // server-backed portion (mirrors WCE's own name sync).
+            // Set without the game's full-array push, then WCE-safe sync.
             WardrobeSetCharacterName(query.slot, name, false);
-            ServerAccountUpdate.QueueData({
-                WardrobeCharacterNames: Player.WardrobeCharacterNames.slice(0, 96),
-            });
+            syncWardrobe();
             return { success: true, data: null };
         }
 
@@ -128,8 +125,7 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
             Player.Wardrobe[query.slot] = Player.Appearance.filter(
                 (a) => a.Asset.Group.Category === 'Appearance' && !a.Asset.Group.Clothing,
             ).map(WardrobeAssetBundle);
-            // The hooked global lets WCE split extended/local slots correctly.
-            ServerAccountUpdate.QueueData({ Wardrobe: CharacterCompressWardrobe(Player.Wardrobe) });
+            syncWardrobe();
             const dummy = WardrobeCharacter?.[query.slot];
             if (dummy) {
                 try {
@@ -140,6 +136,74 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
                 }
             }
             return { success: true, data: null };
+        }
+
+        case 'wardrobe-swap': {
+            if (!Player?.MemberNumber || !Player.Wardrobe) {
+                return { success: false, error: 'Not logged in' };
+            }
+            const max = Player.Wardrobe.length;
+            if (query.a < 0 || query.b < 0 || query.a >= max || query.b >= max || query.a === query.b) {
+                return { success: false, error: 'Invalid slot pair' };
+            }
+            WardrobeSwapSlots(query.a, query.b);
+            syncWardrobe();
+            return { success: true, data: null };
+        }
+
+        case 'wardrobe-get-bundles': {
+            if (!Player?.Wardrobe) {
+                return { success: false, error: 'Not logged in' };
+            }
+            const bundles = Player.Wardrobe[query.slot];
+            if (!bundles) {
+                return { success: false, error: 'No such wardrobe slot' };
+            }
+            return { success: true, data: JSON.parse(JSON.stringify(bundles)) };
+        }
+
+        case 'wardrobe-all-bundles': {
+            if (!Player?.Wardrobe) {
+                return { success: false, error: 'Not logged in' };
+            }
+            const slots = Player.Wardrobe.map((bundles, index) => ({
+                index,
+                name: Player.WardrobeCharacterNames?.[index] ?? `Slot ${index + 1}`,
+                bundles: bundles ?? [],
+            }));
+            return { success: true, data: JSON.parse(JSON.stringify({ slots })) };
+        }
+
+        case 'wardrobe-set-bundles': {
+            if (!Player?.MemberNumber || !Player.Wardrobe) {
+                return { success: false, error: 'Not logged in' };
+            }
+            if (query.slot < 0 || query.slot >= Player.Wardrobe.length) {
+                return { success: false, error: 'No such wardrobe slot' };
+            }
+            // Keep only bundles for assets this game version actually has.
+            const valid = (query.bundles as ItemBundle[]).filter(
+                (b) =>
+                    b &&
+                    typeof b.Group === 'string' &&
+                    typeof b.Name === 'string' &&
+                    AssetGet('Female3DCG', b.Group, b.Name),
+            );
+            if (valid.length === 0) {
+                return { success: false, error: 'No recognizable items in that outfit code' };
+            }
+            Player.Wardrobe[query.slot] = JSON.parse(JSON.stringify(valid)) as ItemBundle[];
+            syncWardrobe();
+            const target = WardrobeCharacter?.[query.slot];
+            if (target) {
+                try {
+                    target.Appearance = [];
+                    WardrobeFastLoad(target, query.slot, false);
+                } catch {
+                    // Preview refresh is cosmetic.
+                }
+            }
+            return { success: true, data: { imported: valid.length, dropped: query.bundles.length - valid.length } };
         }
 
         case 'send-whisper': {
@@ -185,6 +249,18 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
  * preview images — see the wardrobe query above.
  */
 const WARDROBE_IMAGE_LIMIT = 96;
+
+/**
+ * Push wardrobe + names to the server. Names sync only the server-backed
+ * range (mirrors WCE); the hooked CharacterCompressWardrobe lets WCE split
+ * extended/local slots.
+ */
+function syncWardrobe(): void {
+    ServerAccountUpdate.QueueData({
+        Wardrobe: CharacterCompressWardrobe(Player.Wardrobe ?? []),
+        WardrobeCharacterNames: (Player.WardrobeCharacterNames ?? []).slice(0, 96),
+    });
+}
 
 /**
  * Build a worn-items list straight from a wardrobe slot's server bundles,

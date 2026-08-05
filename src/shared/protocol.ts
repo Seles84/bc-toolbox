@@ -88,7 +88,11 @@ export type PageQuery =
     | { type: 'send-whisper'; target: number; message: string }
     | { type: 'send-beep'; target: number; message: string }
     | { type: 'wardrobe-rename'; slot: number; name: string }
-    | { type: 'wardrobe-clear'; slot: number };
+    | { type: 'wardrobe-clear'; slot: number }
+    | { type: 'wardrobe-swap'; a: number; b: number }
+    | { type: 'wardrobe-get-bundles'; slot: number }
+    | { type: 'wardrobe-all-bundles' }
+    | { type: 'wardrobe-set-bundles'; slot: number; bundles: unknown[] };
 
 export type PageQueryResult =
     | { success: true; data: unknown }
