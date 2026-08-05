@@ -12,7 +12,7 @@ import {
 } from '@/shared/protocol';
 import { handlePageMessage, storeCapturedProfile } from './capture';
 import { initBackups } from './backup';
-import { allTabs, findTabByMember, getTab, queryPage, removeTab, statusOf } from './state';
+import { allTabs, findTabByMember, getTab, persistTab, queryPage, removeTab, statusOf } from './state';
 
 // -- Relay ports from game tabs ---------------------------------------------
 
@@ -58,6 +58,13 @@ const handlers: {
 
     async 'tabs.status'() {
         return allTabs().map(statusOf);
+    },
+
+    async 'tabs.setPaused'({ tabId, paused }) {
+        const state = await getTab(tabId);
+        state.capturePaused = paused;
+        await persistTab(state);
+        return null;
     },
 
     async 'page.query'({ memberNumber, query }) {

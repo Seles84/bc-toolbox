@@ -1,10 +1,23 @@
 <script setup lang="ts">
-import { onMounted, onUnmounted, watch } from 'vue';
+import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { useSessionStore } from './stores/session';
 
 const session = useSessionStore();
 const route = useRoute();
+
+const capturePaused = ref(false);
+async function loadPrivacy() {
+    const stored = await chrome.storage.local.get('privacy');
+    capturePaused.value = !!(stored.privacy as { capturePaused?: boolean } | undefined)
+        ?.capturePaused;
+}
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.privacy) {
+        capturePaused.value = !!(changes.privacy.newValue as { capturePaused?: boolean } | undefined)
+            ?.capturePaused;
+    }
+});
 
 // Keep the selected character in sync with the /c/:viewer route segment.
 watch(
@@ -21,6 +34,7 @@ watch(
 let poll: ReturnType<typeof setInterval> | undefined;
 onMounted(() => {
     void session.refreshTabs();
+    void loadPrivacy();
     poll = setInterval(() => void session.refreshTabs(), 15_000);
 });
 onUnmounted(() => clearInterval(poll));
@@ -134,6 +148,12 @@ onUnmounted(() => clearInterval(poll));
             </div>
         </header>
 
+        <div
+            v-if="capturePaused"
+            class="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-center text-sm text-amber-200"
+        >
+            Capture is paused — nothing is being recorded. Resume in Settings or the toolbar popup.
+        </div>
         <div
             v-if="session.tabs.some((t) => t.needsRefresh)"
             class="border-b border-amber-500/30 bg-amber-500/10 px-4 py-2 text-center text-sm text-amber-200"

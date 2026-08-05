@@ -29,9 +29,41 @@ interface ChatRoomSyncData {
     Background?: string;
     Character?: RoomCharacterBundle[];
     Admin?: number[];
+    Private?: boolean;
 }
 
 const STORED_MESSAGE_TYPES = new Set<string>(CHAT_TYPES);
+
+// -- Privacy -----------------------------------------------------------------
+
+interface PrivacySettings {
+    capturePaused: boolean;
+    skipPrivateRooms: boolean;
+}
+
+let privacy: PrivacySettings = { capturePaused: false, skipPrivateRooms: false };
+void chrome.storage.local.get('privacy').then((stored) => {
+    privacy = { ...privacy, ...((stored.privacy as Partial<PrivacySettings>) ?? {}) };
+});
+chrome.storage.onChanged.addListener((changes, area) => {
+    if (area === 'local' && changes.privacy) {
+        privacy = {
+            capturePaused: false,
+            skipPrivateRooms: false,
+            ...((changes.privacy.newValue as Partial<PrivacySettings>) ?? {}),
+        };
+    }
+});
+
+/** May we write anything captured from this tab to the database? */
+function recording(state: TabState): boolean {
+    return !privacy.capturePaused && !state.capturePaused;
+}
+
+/** May we write things captured from this tab's CURRENT ROOM? */
+function recordingRoom(state: TabState): boolean {
+    return recording(state) && !state.roomPrivate;
+}
 
 // -- Keyword alerts ----------------------------------------------------------
 
@@ -102,11 +134,15 @@ export async function handlePageMessage(state: TabState, message: PageMessage): 
             return;
 
         case 'appearance':
-            await upsertMember(profileToRecord(message.profile, message.timestamp));
+            if (recordingRoom(state)) {
+                await upsertMember(profileToRecord(message.profile, message.timestamp));
+            }
             return;
 
         case 'chat-line':
-            await onChatLine(state, message.line, message.timestamp);
+            if (recordingRoom(state)) {
+                await onChatLine(state, message.line, message.timestamp);
+            }
             return;
 
         case 'game-event':
@@ -130,7 +166,9 @@ export async function storeCapturedProfile(profile: CapturedProfile): Promise<vo
 
 async function onLogin(state: TabState, player: CapturedProfile): Promise<void> {
     const now = Date.now();
-    await upsertMember(profileToRecord(player, now));
+    if (recording(state)) {
+        await upsertMember(profileToRecord(player, now));
+    }
 
     if (state.memberNumber === player.memberNumber && state.sessionId) {
         return; // duplicate login event for a session we're already tracking
@@ -140,17 +178,20 @@ async function onLogin(state: TabState, player: CapturedProfile): Promise<void> 
     // An extension reload wipes tab state, orphaning the character's previous
     // session as forever-"active". One character can't be logged in twice, so
     // any open session of theirs is stale — close it (and its open rooms).
+    // (Finalizing old data is fine even while paused.)
     await closeDanglingSessions(player.memberNumber, now);
 
     state.memberNumber = player.memberNumber;
     state.characterName = player.nickname || player.name;
-    state.sessionId = crypto.randomUUID();
-    await db.playerSessions.add({
-        sessionId: state.sessionId,
-        member: player.memberNumber,
-        started: now,
-        ended: 0,
-    });
+    if (recording(state)) {
+        state.sessionId = crypto.randomUUID();
+        await db.playerSessions.add({
+            sessionId: state.sessionId,
+            member: player.memberNumber,
+            started: now,
+            ended: 0,
+        });
+    }
     await persistTab(state);
 }
 
@@ -234,7 +275,7 @@ async function onBeep(
     timestamp: number,
 ): Promise<void> {
     const beep = data as AccountBeepData;
-    if (!state.memberNumber || typeof beep?.MemberNumber !== 'number') {
+    if (!state.memberNumber || typeof beep?.MemberNumber !== 'number' || !recording(state)) {
         return;
     }
     // BeepType marks game/mod mechanics (leashes, addon sync) — not user beeps.
@@ -261,6 +302,19 @@ async function onBeep(
 
 async function onRoomSync(state: TabState, data: ChatRoomSyncData, timestamp: number): Promise<void> {
     if (!data?.Name) {
+        return;
+    }
+
+    // Privacy: paused tabs and (optionally) private rooms are display-only —
+    // track where we are, close any open recording, write nothing else.
+    state.roomPrivate = privacy.skipPrivateRooms && !!data.Private;
+    if (!recordingRoom(state)) {
+        if (state.channelId) {
+            await db.chatChannels.update(state.channelId, { left: timestamp });
+        }
+        state.channelId = undefined;
+        state.roomName = data.Name;
+        await persistTab(state);
         return;
     }
 
@@ -318,7 +372,7 @@ async function onMemberJoin(
     data: { Character?: RoomCharacterBundle },
     timestamp: number,
 ): Promise<void> {
-    if (!data?.Character) {
+    if (!data?.Character || !recordingRoom(state)) {
         return;
     }
     await captureRoomCharacter(state, data.Character, timestamp);
@@ -337,7 +391,7 @@ async function onMemberLeave(
     data: { SourceMemberNumber?: number },
     timestamp: number,
 ): Promise<void> {
-    if (typeof data?.SourceMemberNumber === 'number') {
+    if (typeof data?.SourceMemberNumber === 'number' && recordingRoom(state)) {
         await markSeen(state, data.SourceMemberNumber, timestamp);
     }
 }

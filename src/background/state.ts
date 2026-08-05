@@ -13,6 +13,10 @@ export interface TabState {
     needsRefresh: boolean;
     friends?: OnlineFriendInfo[];
     friendsUpdated?: number;
+    /** Capture paused for this tab (persisted across worker restarts) */
+    capturePaused?: boolean;
+    /** Current room is private and the skip-private-rooms rule applies */
+    roomPrivate?: boolean;
     memberNumber?: number;
     characterName?: string;
     sessionId?: string;
@@ -28,7 +32,7 @@ const STORAGE_PREFIX = 'tabState:';
 
 type PersistedTabState = Pick<
     TabState,
-    'memberNumber' | 'characterName' | 'sessionId' | 'channelId' | 'roomName'
+    'memberNumber' | 'characterName' | 'sessionId' | 'channelId' | 'roomName' | 'capturePaused'
 >;
 
 export async function getTab(tabId: number): Promise<TabState> {
@@ -52,6 +56,7 @@ export async function persistTab(state: TabState): Promise<void> {
         sessionId: state.sessionId,
         channelId: state.channelId,
         roomName: state.roomName,
+        capturePaused: state.capturePaused,
     };
     await chrome.storage.session.set({ [STORAGE_PREFIX + state.tabId]: persisted });
 }
@@ -81,6 +86,8 @@ export function statusOf(state: TabState): TabStatus {
         needsRefresh: state.needsRefresh,
         friends: state.friends,
         friendsUpdated: state.friendsUpdated,
+        capturePaused: state.capturePaused,
+        roomPrivate: state.roomPrivate,
     };
 }
 

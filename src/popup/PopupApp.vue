@@ -10,6 +10,24 @@ import { api } from '../ui/api';
 
 const version = __BCT_VERSION__;
 const tabs = ref<TabStatus[]>([]);
+const globalPaused = ref(false);
+
+async function loadPrivacy() {
+    const stored = await chrome.storage.local.get('privacy');
+    globalPaused.value = !!(stored.privacy as { capturePaused?: boolean } | undefined)?.capturePaused;
+}
+
+async function toggleGlobalPause() {
+    const stored = await chrome.storage.local.get('privacy');
+    const privacy = (stored.privacy as Record<string, unknown>) ?? {};
+    globalPaused.value = !globalPaused.value;
+    await chrome.storage.local.set({ privacy: { ...privacy, capturePaused: globalPaused.value } });
+}
+
+async function toggleTabPause(tab: TabStatus) {
+    await api('tabs.setPaused', { tabId: tab.tabId, paused: !tab.capturePaused });
+    tabs.value = await api('tabs.status', undefined);
+}
 const rosters = ref(new Map<number, RosterMember[]>());
 const characterCount = ref(0);
 const loaded = ref(false);
@@ -23,6 +41,7 @@ onMounted(async () => {
         tabs.value = [];
     }
     characterCount.value = await db.members.where('isPlayer').equals(1).count();
+    await loadPrivacy();
     loaded.value = true;
 
     // Fetch each in-room tab's live roster in parallel.
@@ -67,6 +86,18 @@ function open(path = '') {
         <div v-if="!loaded" class="py-6 text-center text-sm text-neutral-500">Loading…</div>
 
         <template v-else>
+            <button
+                class="mb-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm"
+                :class="
+                    globalPaused
+                        ? 'bg-amber-500/15 text-amber-300 hover:bg-amber-500/25'
+                        : 'bg-surface-2 text-neutral-300 hover:bg-surface-3'
+                "
+                @click="toggleGlobalPause"
+            >
+                <span class="h-2 w-2 rounded-full" :class="globalPaused ? 'bg-amber-400' : 'bg-emerald-400'" />
+                {{ globalPaused ? 'Capture paused — click to resume' : 'Capture active — click to pause' }}
+            </button>
             <div v-if="liveTabs.length === 0" class="card p-4 text-center text-sm text-neutral-400">
                 No characters online.
                 <p v-if="characterCount === 0" class="mt-1 text-xs text-neutral-600">
@@ -83,7 +114,13 @@ function open(path = '') {
                         <div class="flex items-center gap-2">
                             <span
                                 class="h-2 w-2 shrink-0 rounded-full"
-                                :class="tab.needsRefresh ? 'bg-amber-400' : 'bg-emerald-400'"
+                                :class="
+                                    tab.capturePaused || globalPaused
+                                        ? 'bg-neutral-500'
+                                        : tab.needsRefresh
+                                          ? 'bg-amber-400'
+                                          : 'bg-emerald-400'
+                                "
                             />
                             <span class="truncate text-sm font-medium text-white">
                                 {{ tab.characterName ?? `#${tab.memberNumber}` }}
@@ -99,11 +136,27 @@ function open(path = '') {
                         </div>
                         <p class="mt-1 truncate text-xs text-neutral-500">
                             {{ tab.roomName ? `In ${tab.roomName}` : 'Not in a room' }}
+                            <span v-if="tab.roomPrivate" class="text-amber-400/80">
+                                · private, not recorded</span
+                            >
                         </p>
                         <p v-if="tab.needsRefresh" class="mt-1 text-xs text-amber-400">
                             Refresh the game tab to update capture
                         </p>
                     </button>
+                    <div class="border-t border-white/5 px-3 py-1.5">
+                        <button
+                            class="text-[11px]"
+                            :class="
+                                tab.capturePaused
+                                    ? 'text-amber-300 hover:text-amber-200'
+                                    : 'text-neutral-500 hover:text-white'
+                            "
+                            @click="toggleTabPause(tab)"
+                        >
+                            {{ tab.capturePaused ? 'Capture paused for this tab — resume' : 'Pause capture for this tab' }}
+                        </button>
+                    </div>
 
                     <ul
                         v-if="rosters.get(tab.memberNumber!)?.length"

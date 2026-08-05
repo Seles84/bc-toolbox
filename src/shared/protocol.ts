@@ -149,11 +149,16 @@ export interface TabStatus {
     friends?: OnlineFriendInfo[];
     /** When the friends list was last refreshed */
     friendsUpdated?: number;
+    /** Capture paused for this tab specifically */
+    capturePaused?: boolean;
+    /** Current room is private and the skip-private-rooms rule is active */
+    roomPrivate?: boolean;
 }
 
 export interface ApiEndpoints {
     ping: { params: undefined; result: { now: number; version: string } };
     'tabs.status': { params: undefined; result: TabStatus[] };
+    'tabs.setPaused': { params: { tabId: number; paused: boolean }; result: null };
     /** Run a PageQuery against the live game tab of the given character. */
     'page.query': {
         params: { memberNumber: number; query: PageQuery };

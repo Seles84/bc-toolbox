@@ -58,6 +58,21 @@ watch(
     { deep: true },
 );
 
+// -- Privacy -----------------------------------------------------------------
+
+const privacy = ref({ capturePaused: false, skipPrivateRooms: false });
+let privacyLoaded = false;
+
+watch(
+    privacy,
+    () => {
+        if (privacyLoaded) {
+            void chrome.storage.local.set({ privacy: { ...privacy.value } });
+        }
+    },
+    { deep: true },
+);
+
 // -- Keyword alerts ----------------------------------------------------------
 
 const keywords = ref<string[]>([]);
@@ -291,7 +306,14 @@ onMounted(async () => {
     } catch {
         version.value = 'background unreachable';
     }
-    const stored = await chrome.storage.local.get(['autoBackup', 'lastAutoBackup', 'alertKeywords']);
+    const stored = await chrome.storage.local.get([
+        'autoBackup',
+        'lastAutoBackup',
+        'alertKeywords',
+        'privacy',
+    ]);
+    privacy.value = { ...privacy.value, ...((stored.privacy as Partial<typeof privacy.value>) ?? {}) };
+    privacyLoaded = true;
     backup.value = { ...backup.value, ...((stored.autoBackup as Partial<BackupSettings>) ?? {}) };
     lastAutoBackup.value = (stored.lastAutoBackup as number) ?? null;
     backupLoaded = true;
@@ -456,6 +478,27 @@ async function applyImport() {
                 <button class="btn" :disabled="measuring" @click="measureTables">
                     {{ measuring ? 'Measuring…' : 'Measure table sizes' }}
                 </button>
+            </div>
+        </div>
+
+        <div class="card mb-4 p-5">
+            <h2 class="mb-1 font-medium text-white">Privacy</h2>
+            <p class="mb-3 text-sm text-neutral-500">
+                While paused, nothing new is recorded — live status, wardrobe and sending still
+                work. Per-tab pausing is in the toolbar popup.
+            </p>
+            <div class="flex flex-col gap-2 text-sm">
+                <label class="flex cursor-pointer items-center gap-2 text-neutral-300">
+                    <input v-model="privacy.capturePaused" type="checkbox" class="accent-accent" />
+                    Pause all capture
+                </label>
+                <label class="flex cursor-pointer items-center gap-2 text-neutral-300">
+                    <input v-model="privacy.skipPrivateRooms" type="checkbox" class="accent-accent" />
+                    Never record private rooms
+                    <span class="text-xs text-neutral-600">
+                        (no chat, members or sightings from rooms marked private)</span
+                    >
+                </label>
             </div>
         </div>
 
