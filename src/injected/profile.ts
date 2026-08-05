@@ -44,7 +44,7 @@ export function buildProfile(character: Character, withAppearance: boolean): Cap
         blacklist: character.BlackList,
         reputation: sanitize(character.Reputation) as CapturedProfile['reputation'],
         skills: sanitize(character.Skill) as CapturedProfile['skills'],
-        crafting: character.IsPlayer() ? (sanitize(Player.Crafting) as unknown[] | undefined) : undefined,
+        crafting: buildCrafting(character),
         // Favorites are folded into per-item PermissionItems records since R117
         favoriteItems: Object.entries(character.PermissionItems ?? {})
             .filter(([, permission]) => permission?.Permission === 'Favorite')
@@ -72,6 +72,25 @@ export function canvasToDataUrl(canvas: HTMLCanvasElement | null): string | unde
     }
     const webp = canvas.toDataURL('image/webp', 0.85);
     return webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/png');
+}
+
+/**
+ * Crafting arrives parsed for the player but as a compressed string for other
+ * characters — the game's own deserializer handles both shapes.
+ */
+function buildCrafting(character: Character): unknown[] | undefined {
+    try {
+        const source = character.IsPlayer()
+            ? Player.Crafting
+            : (character as Character & { Crafting?: string | (null | CraftingItem)[] }).Crafting;
+        if (!source) {
+            return undefined;
+        }
+        const items = CraftingDecompressServerData(source).filter(Boolean);
+        return items.length > 0 ? (sanitize(items) as unknown[] | undefined) : undefined;
+    } catch {
+        return undefined;
+    }
 }
 
 /** Addon payloads other mods stash on the character object. */
