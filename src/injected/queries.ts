@@ -41,21 +41,36 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
             }
             try {
                 WardrobeLoadCharacters(false);
-            } catch {
-                // Wardrobe may not be initialised yet; fall through with whatever exists.
+            } catch (error) {
+                // One bad slot aborts the game's whole build loop, leaving
+                // WardrobeCharacter truncated — item data below doesn't
+                // depend on it, only previews do.
+                console.warn('[BCT] wardrobe character build stopped early', error);
             }
             await renderWardrobeCanvases();
 
-            const slots: WardrobeSlotInfo[] = (WardrobeCharacter ?? []).map((c, index) => ({
-                index,
-                name: Player.WardrobeCharacterNames?.[index] ?? `Slot ${index + 1}`,
-                // Item lists for every slot; preview images only within the
-                // limit (WCE's local wardrobe can reach 384 slots — imaging
-                // them all means seconds of jank and ~25MB payloads).
-                image:
-                    index < WARDROBE_IMAGE_LIMIT && c?.Canvas ? safeDataUrl(c.Canvas) : undefined,
-                items: c ? (buildWornItems(c) ?? []) : [],
-            }));
+            // Player.Wardrobe is the authoritative slot list (including WCE
+            // extended/local slots); dummy characters only supply previews.
+            const bundleSlots = Player.Wardrobe ?? [];
+            const count = Math.max(bundleSlots.length, WardrobeCharacter?.length ?? 0);
+            const slots: WardrobeSlotInfo[] = [];
+            for (let index = 0; index < count; index++) {
+                const dummy = WardrobeCharacter?.[index];
+                slots.push({
+                    index,
+                    name: Player.WardrobeCharacterNames?.[index] ?? `Slot ${index + 1}`,
+                    // Preview images only within the limit (WCE's local
+                    // wardrobe can reach 384 slots — imaging them all means
+                    // seconds of jank and ~25MB payloads).
+                    image:
+                        index < WARDROBE_IMAGE_LIMIT && dummy?.Canvas
+                            ? safeDataUrl(dummy.Canvas)
+                            : undefined,
+                    items: dummy
+                        ? (buildWornItems(dummy) ?? [])
+                        : bundlesToWornItems(bundleSlots[index]),
+                });
+            }
             return { success: true, data: { slots } };
         }
 
@@ -121,6 +136,35 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
  * preview images — see the wardrobe query above.
  */
 const WARDROBE_IMAGE_LIMIT = 96;
+
+/**
+ * Build a worn-items list straight from a wardrobe slot's server bundles,
+ * for slots whose dummy character was never created.
+ */
+function bundlesToWornItems(bundles: (ItemBundle | null)[] | null | undefined): import('@/shared/records').WornItem[] {
+    const items: import('@/shared/records').WornItem[] = [];
+    for (const bundle of bundles ?? []) {
+        if (!bundle?.Name || !bundle.Group) continue;
+        const asset = AssetGet('Female3DCG', bundle.Group, bundle.Name);
+        if (!asset) continue;
+        const group = asset.Group;
+        const restraint = group.Category === 'Item';
+        if (!restraint && !group.Clothing) continue;
+        const rawColor = Array.isArray(bundle.Color) ? bundle.Color[0] : bundle.Color;
+        items.push({
+            group: group.Name,
+            groupLabel: group.Description,
+            name: asset.Description,
+            asset: asset.Name,
+            color: rawColor && rawColor !== 'Default' ? rawColor : undefined,
+            lock: bundle.Property?.LockedBy || undefined,
+            craftName: bundle.Craft?.Name || undefined,
+            craftedBy: bundle.Craft?.MemberNumber,
+            restraint,
+        });
+    }
+    return items;
+}
 
 /**
  * Wardrobe dummy characters are never drawn on screen (unless the in-game
