@@ -1,0 +1,14 @@
+{
+    "extends": "./tsconfig.base.json",
+    "include": [
+        "src/injected/**/*",
+        "src/shared/**/*",
+        "env.d.ts",
+        "node_modules/bc-stubs/bc/**/*.d.ts"
+    ],
+    "compilerOptions": {
+        "tsBuildInfoFile": "node_modules/.tmp/tsconfig.injected.tsbuildinfo",
+        "lib": ["ES2022", "DOM", "DOM.Iterable"],
+        "types": []
+    }
+}

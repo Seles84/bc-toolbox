@@ -1,0 +1,36 @@
+@import 'tailwindcss';
+
+@theme {
+    --color-surface: #121212;
+    --color-surface-1: #1e1e1e;
+    --color-surface-2: #2a2a2a;
+    --color-surface-3: #363636;
+    --color-accent: #7c5cff;
+    --color-accent-soft: #a78bfa;
+}
+
+html {
+    color-scheme: dark;
+}
+
+body {
+    @apply bg-surface text-neutral-200 antialiased;
+}
+
+.card {
+    @apply rounded-lg bg-surface-1 border border-white/5 shadow-md;
+}
+
+.btn {
+    @apply inline-flex items-center gap-2 rounded-md px-3 py-1.5 text-sm font-medium transition-colors
+        bg-surface-2 hover:bg-surface-3 text-neutral-200 disabled:opacity-40 disabled:pointer-events-none;
+}
+
+.btn-accent {
+    @apply bg-accent/80 hover:bg-accent text-white;
+}
+
+.input {
+    @apply w-full rounded-md bg-surface-2 border border-white/10 px-3 py-1.5 text-sm text-neutral-100
+        placeholder:text-neutral-500 focus:outline-none focus:border-accent-soft/60;
+}
