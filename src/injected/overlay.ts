@@ -1,15 +1,22 @@
 /**
- * In-game overlay: when the player opens someone's profile (InformationSheet),
- * float a small BCT panel with your tags, note, sighting history and previous
- * names for that character — or "first time meeting".
+ * In-game overlay: while viewing someone's profile (InformationSheet), a
+ * "BCT" button sits beside the game's own top-right button column; clicking
+ * it toggles a panel with your tags, note, sighting history, previous names
+ * and a live restraint summary for that character.
  *
- * Pure DOM with inline styles (the game page has no Tailwind), positioned
- * bottom-right, pointer-events off so it can never block the game.
+ * The button/panel are DOM, positioned each frame from the game canvas rect
+ * (the game scales its 2000×1000 canvas to the window), so they track
+ * resizes exactly like the game's own DOM inputs.
  */
 import type { ModSDKModAPI } from 'bondage-club-mod-sdk';
 import type { OverlayMemberInfo, PageDataRequest } from '@/shared/protocol';
 
+const BUTTON_ID = 'bct-overlay-button';
 const PANEL_ID = 'bct-overlay-panel';
+
+/** Canvas-space geometry: beside the sheet's button column (Exit is 1815,75). */
+const BTN = { x: 1705, y: 75, w: 90, h: 90 };
+const PANEL = { right: 1690, top: 75, width: 520, maxHeight: 850 };
 
 const TAG_COLORS: Record<string, string> = {
     friend: '#34d399',
@@ -20,13 +27,21 @@ const TAG_COLORS: Record<string, string> = {
 
 type RequestData = (request: PageDataRequest) => Promise<unknown>;
 
+let currentInfo: OverlayMemberInfo | null = null;
+let currentCharacter: Character | null = null;
+let panelOpen = false;
+
 export function initOverlay(mod: ModSDKModAPI, requestData: RequestData): void {
-    function removePanel() {
+    function cleanup() {
+        document.getElementById(BUTTON_ID)?.remove();
         document.getElementById(PANEL_ID)?.remove();
+        currentInfo = null;
+        currentCharacter = null;
+        panelOpen = false;
     }
 
     async function showFor(character: Character) {
-        removePanel();
+        cleanup();
         const member = character?.MemberNumber;
         if (!member || member <= 0 || character.IsPlayer() || character.IsNpc()) {
             return;
@@ -39,7 +54,42 @@ export function initOverlay(mod: ModSDKModAPI, requestData: RequestData): void {
         if (CurrentScreen !== 'InformationSheet' || InformationSheetSelection?.MemberNumber !== member) {
             return;
         }
-        document.body.appendChild(buildPanel(info, restraintSummary(character)));
+        currentInfo = info;
+        currentCharacter = character;
+
+        const button = document.createElement('button');
+        button.id = BUTTON_ID;
+        button.textContent = 'BCT';
+        button.title = 'BC Toolbox — notes and history';
+        button.style.cssText = [
+            'position:fixed',
+            'z-index:2147483000',
+            'background:#fff',
+            'color:#000',
+            'border:2px solid #000',
+            'border-radius:4px',
+            'font-weight:700',
+            'font-family:Arial,sans-serif',
+            'cursor:pointer',
+            'padding:0',
+            'line-height:1',
+        ].join(';');
+        button.addEventListener('click', (event) => {
+            event.stopPropagation();
+            togglePanel();
+        });
+        document.body.appendChild(button);
+        positionAll();
+    }
+
+    function togglePanel() {
+        panelOpen = !panelOpen;
+        document.getElementById(PANEL_ID)?.remove();
+        if (panelOpen && currentInfo && currentCharacter) {
+            const panel = buildPanel(currentInfo, restraintSummary(currentCharacter));
+            document.body.appendChild(panel);
+            positionAll();
+        }
     }
 
     mod.hookFunction('InformationSheetLoad', 0, (args, next) => {
@@ -51,13 +101,49 @@ export function initOverlay(mod: ModSDKModAPI, requestData: RequestData): void {
         return result;
     });
 
-    // Any screen change away from the sheet (or into a subscreen) hides it.
+    // Track canvas position/scale every frame, like the game's DOM inputs.
+    mod.hookFunction('InformationSheetRun', 0, (args, next) => {
+        const result = next(args);
+        positionAll();
+        return result;
+    });
+
+    // Any screen change away from the sheet (or into a subscreen) removes it.
     mod.hookFunction('CommonSetScreen', 0, (args, next) => {
         if (args[1] !== 'InformationSheet') {
-            removePanel();
+            cleanup();
         }
         return next(args);
     });
+}
+
+/** Map game-canvas coordinates onto the page and apply them. */
+function positionAll(): void {
+    const button = document.getElementById(BUTTON_ID);
+    if (!button) {
+        return;
+    }
+    const canvas = MainCanvas?.canvas;
+    if (!canvas) {
+        return;
+    }
+    const rect = canvas.getBoundingClientRect();
+    const scale = rect.width / 2000;
+
+    button.style.left = `${rect.left + BTN.x * scale}px`;
+    button.style.top = `${rect.top + BTN.y * scale}px`;
+    button.style.width = `${BTN.w * scale}px`;
+    button.style.height = `${BTN.h * scale}px`;
+    button.style.fontSize = `${Math.max(11, 30 * scale)}px`;
+
+    const panel = document.getElementById(PANEL_ID);
+    if (panel) {
+        const width = Math.max(280, PANEL.width * scale);
+        panel.style.left = `${rect.left + PANEL.right * scale - width}px`;
+        panel.style.top = `${rect.top + PANEL.top * scale}px`;
+        panel.style.width = `${width}px`;
+        panel.style.maxHeight = `${PANEL.maxHeight * scale}px`;
+    }
 }
 
 /** Live restraint count read straight off the inspected character. */
@@ -85,19 +171,16 @@ function buildPanel(info: OverlayMemberInfo, restraints?: string): HTMLDivElemen
     panel.id = PANEL_ID;
     panel.style.cssText = [
         'position:fixed',
-        'right:16px',
-        'bottom:16px',
         'z-index:2147483000',
-        'max-width:300px',
+        'overflow-y:auto',
         'padding:12px 14px',
         'border-radius:10px',
-        'background:rgba(18,18,18,0.92)',
+        'background:rgba(18,18,18,0.95)',
         'border:1px solid rgba(255,255,255,0.15)',
         'color:#e5e5e5',
         'font-family:system-ui,sans-serif',
         'font-size:13px',
         'line-height:1.45',
-        'pointer-events:none',
         'box-shadow:0 4px 24px rgba(0,0,0,0.4)',
     ].join(';');
 
@@ -118,7 +201,7 @@ function buildPanel(info: OverlayMemberInfo, restraints?: string): HTMLDivElemen
 
     if (info.tags.length > 0) {
         const tagRow = document.createElement('div');
-        tagRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin-bottom:6px';
+        tagRow.style.cssText = 'display:flex;flex-wrap:wrap;gap:4px;margin:6px 0';
         for (const tag of info.tags) {
             const chip = document.createElement('span');
             chip.textContent = tag;
@@ -142,7 +225,7 @@ function buildPanel(info: OverlayMemberInfo, restraints?: string): HTMLDivElemen
 
     if (info.note) {
         const note = document.createElement('div');
-        note.textContent = info.note.length > 280 ? info.note.slice(0, 280) + '…' : info.note;
+        note.textContent = info.note.length > 600 ? info.note.slice(0, 600) + '…' : info.note;
         note.style.cssText =
             'margin-top:6px;padding-top:6px;border-top:1px solid rgba(255,255,255,0.1);white-space:pre-wrap;color:#d4d4d4';
         panel.appendChild(note);
