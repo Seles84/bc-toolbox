@@ -230,6 +230,10 @@ const changedCount = computed(
         </div>
 
         <p v-if="error" class="mb-4 text-sm text-amber-400">{{ error }}</p>
+        <p v-if="(shownSlots?.length ?? 0) > 96" class="mb-4 text-xs text-neutral-600">
+            Slots 97+ (WCE local wardrobe) are captured with item lists but no preview images, to
+            keep captures fast and snapshots small.
+        </p>
 
         <div v-if="!shownSlots" class="card mx-auto max-w-lg p-8 text-center text-neutral-400">
             <template v-if="source === 'live'">

@@ -49,7 +49,11 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
             const slots: WardrobeSlotInfo[] = (WardrobeCharacter ?? []).map((c, index) => ({
                 index,
                 name: Player.WardrobeCharacterNames?.[index] ?? `Slot ${index + 1}`,
-                image: c?.Canvas ? safeDataUrl(c.Canvas) : undefined,
+                // Item lists for every slot; preview images only within the
+                // limit (WCE's local wardrobe can reach 384 slots — imaging
+                // them all means seconds of jank and ~25MB payloads).
+                image:
+                    index < WARDROBE_IMAGE_LIMIT && c?.Canvas ? safeDataUrl(c.Canvas) : undefined,
                 items: c ? (buildWornItems(c) ?? []) : [],
             }));
             return { success: true, data: { slots } };
@@ -113,18 +117,25 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
 }
 
 /**
+ * Slots past this index (WCE local wardrobe territory) get item lists but no
+ * preview images — see the wardrobe query above.
+ */
+const WARDROBE_IMAGE_LIMIT = 96;
+
+/**
  * Wardrobe dummy characters are never drawn on screen (unless the in-game
  * wardrobe is open), and the game only rebuilds a character canvas during
  * on-screen drawing. Asset images finishing their download merely flag the
  * character `MustDraw` — so off-screen wardrobe canvases stay half-drawn
  * forever. Drive the rebuild ourselves: rebuild every flagged canvas, wait,
  * and repeat until no new flags appear (i.e. all images have arrived).
+ * Only slots we'll actually image are rendered.
  */
 async function renderWardrobeCanvases(): Promise<void> {
     let quietTicks = 0;
-    for (let i = 0; i < 50 && quietTicks < 3; i++) {
+    for (let i = 0; i < 75 && quietTicks < 3; i++) {
         let redrew = false;
-        for (const character of WardrobeCharacter ?? []) {
+        for (const character of (WardrobeCharacter ?? []).slice(0, WARDROBE_IMAGE_LIMIT)) {
             if (character?.MustDraw) {
                 try {
                     CharacterLoadCanvas(character);

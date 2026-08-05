@@ -101,9 +101,9 @@ export function statusOf(state: TabState): TabStatus {
 export function queryPage(
     state: TabState,
     query: PageQuery,
-    // Generous: the wardrobe query can spend ~10s driving canvas rebuilds
-    // while asset images download.
-    timeoutMs = 25_000,
+    // Generous: the wardrobe query can spend ~15s driving canvas rebuilds
+    // for up to 96 slots while asset images download.
+    timeoutMs = 40_000,
 ): Promise<PageQueryResult> {
     return new Promise((resolve) => {
         if (!state.port) {
