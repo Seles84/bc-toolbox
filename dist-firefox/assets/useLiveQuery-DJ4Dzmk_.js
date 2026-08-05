@@ -1,0 +1,1 @@
+import{w as o,z as c,q as l,r as b}from"./style-CYEcjmPN.js";function f(i,u,t){const s=b(t);let e=null;function n(){e?.unsubscribe(),e=l(i).subscribe({next:r=>{s.value=r},error:r=>{console.error("[BCT] liveQuery error",r)}})}return u.length>0?o(u,n,{immediate:!0}):n(),c(()=>e?.unsubscribe()),s}export{f as u};

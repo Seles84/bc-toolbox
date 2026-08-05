@@ -86,6 +86,13 @@ onUnmounted(() => clearInterval(poll));
                         Wardrobe
                     </RouterLink>
                     <RouterLink
+                        :to="{ name: 'crafts', params: { viewer: session.viewer } }"
+                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
+                        active-class="!text-white bg-white/10"
+                    >
+                        Crafts
+                    </RouterLink>
+                    <RouterLink
                         :to="{ name: 'search', params: { viewer: session.viewer } }"
                         class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
                         active-class="!text-white bg-white/10"

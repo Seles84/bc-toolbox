@@ -114,6 +114,16 @@ for (const script of SCRIPTS) {
 }
 await buildUi();
 
+// Firefox variant: identical files, gecko manifest (event page background).
+if (process.argv.includes('--firefox')) {
+    const distFirefox = resolve(root, 'dist-firefox');
+    await rm(distFirefox, { recursive: true, force: true });
+    await cp(dist, distFirefox, { recursive: true });
+    const manifest = buildManifest({ dev: watch, version: pkg.version, browser: 'firefox' });
+    await writeFile(resolve(distFirefox, 'manifest.json'), JSON.stringify(manifest, null, 2));
+    console.log('[bct] Firefox build written to dist-firefox/');
+}
+
 if (watch) {
     console.log('\n[bct] watching for changes… (reload the extension to apply)');
 }

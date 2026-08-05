@@ -1,0 +1,1 @@
+const e=[{tag:"Friend",class:"bg-emerald-500/20 text-emerald-300"},{tag:"Caution",class:"bg-amber-500/20 text-amber-300"},{tag:"Watch",class:"bg-sky-500/20 text-sky-300"},{tag:"Avoid",class:"bg-rose-500/20 text-rose-300"}];function s(t){return e.find(a=>a.tag.toLowerCase()===t.toLowerCase())?.class??"bg-neutral-500/20 text-neutral-300"}export{e as P,s as t};

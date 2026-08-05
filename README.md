@@ -77,6 +77,15 @@ refresh to re-inject.
 `scripts/manifest.mjs` is the single source of truth for game domains; watch/dev
 builds get the dev origins appended and the name suffixed with "(Dev)".
 
+### Firefox
+
+`yarn build:firefox` additionally writes `dist-firefox/` — same files, gecko
+manifest (Firefox MV3 uses a background event page instead of a service
+worker). Load via `about:debugging` → "Load Temporary Add-on". Caveats: Firefox
+treats MV3 host permissions as opt-in, so grant site access in the extension's
+Permissions settings or capture silently won't run; Firefox support has not
+been battle-tested the way Chrome has.
+
 ## Versioning
 
 [Semver](https://semver.org/): **major** = breaking change to the database schema or backup
