@@ -12,6 +12,8 @@ import type { ChatLogRecord, MemberRecord } from '@/shared/records';
 const props = defineProps<{
     line: ChatLogRecord;
     members: Map<number, MemberRecord>;
+    /** The character whose log this is â€” fallback whisper target */
+    viewer?: number;
 }>();
 
 interface DictionaryEntry {
@@ -36,6 +38,16 @@ function colorOf(memberNumber?: number): string {
 }
 
 const senderName = computed(() => props.line.senderName ?? nameOf(props.line.sender));
+
+/**
+ * Whisper target, defaulting to the viewing character for incoming whispers
+ * stored before capture recorded the implicit target.
+ */
+const whisperTarget = computed(() => {
+    if (props.line.target !== undefined) return props.line.target;
+    if (props.viewer !== undefined && props.line.sender !== props.viewer) return props.viewer;
+    return undefined;
+});
 
 /** Templated line: prefer the game-rendered capture, fall back to heuristics. */
 const templatedText = computed(() => {
@@ -78,18 +90,18 @@ function splitCamelCase(value: string): string {
     <div class="text-sm leading-relaxed">
         <template v-if="line.type === 'Chat'">
             <span class="font-semibold" :style="{ color: colorOf(line.sender) }">{{ senderName }}</span>
-            <span class="text-neutral-400">{{ ':Â ' }}</span>
+            <span class="text-neutral-400">{{ ': ' }}</span>
             <span class="text-neutral-200">{{ line.message }}</span>
         </template>
 
         <template v-else-if="line.type === 'Whisper'">
             <span class="text-fuchsia-300">
                 <span class="font-semibold" :style="{ color: colorOf(line.sender) }">{{ senderName }}</span>
-                <span class="text-neutral-500">{{ 'Â whispers toÂ ' }}</span>
-                <span class="font-semibold" :style="{ color: colorOf(line.target) }">{{
-                    nameOf(line.target)
+                <span class="text-neutral-500">{{ ' whispers to ' }}</span>
+                <span class="font-semibold" :style="{ color: colorOf(whisperTarget) }">{{
+                    nameOf(whisperTarget)
                 }}</span>
-                <span class="text-neutral-500">{{ ':Â ' }}</span>
+                <span class="text-neutral-500">{{ ': ' }}</span>
                 <span>{{ line.message }}</span>
             </span>
         </template>
@@ -98,7 +110,7 @@ function splitCamelCase(value: string): string {
             <span class="text-sky-200 italic">
                 <span>*</span>
                 <span class="font-semibold" :style="{ color: colorOf(line.sender) }">{{ senderName }}</span>
-                <span>{{ 'Â ' + line.message + '*' }}</span>
+                <span>{{ ' ' + line.message + '*' }}</span>
             </span>
         </template>
 

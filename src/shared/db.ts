@@ -5,8 +5,10 @@
  */
 import Dexie, { type EntityTable } from 'dexie';
 import type {
+    BeepRecord,
     ChatChannelRecord,
     ChatLogRecord,
+    MemberNoteRecord,
     MemberRecord,
     MemberSeenRecord,
     PlayerSessionRecord,
@@ -18,6 +20,8 @@ export class BctDatabase extends Dexie {
     chatChannels!: EntityTable<ChatChannelRecord, 'id'>;
     memberSeen!: EntityTable<MemberSeenRecord, 'id'>;
     playerSessions!: EntityTable<PlayerSessionRecord, 'id'>;
+    beeps!: EntityTable<BeepRecord, 'id'>;
+    notes!: EntityTable<MemberNoteRecord, 'id'>;
 
     constructor() {
         super('bc-toolbox');
@@ -27,6 +31,12 @@ export class BctDatabase extends Dexie {
             chatChannels: '++id, sessionId, [sessionId+left]',
             memberSeen: '++id, &[member+viewer], viewer',
             playerSessions: '++id, sessionId, member, [member+ended]',
+        });
+        this.version(2).stores({
+            beeps: '++id, viewer, [viewer+member], created',
+        });
+        this.version(3).stores({
+            notes: '++id, &[member+viewer], viewer',
         });
     }
 }

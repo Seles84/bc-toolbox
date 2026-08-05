@@ -8,7 +8,7 @@ export const router = createRouter({
         {
             path: '/c/:viewer(\\d+)',
             children: [
-                { path: '', redirect: (to) => ({ name: 'members', params: to.params }) },
+                { path: '', name: 'dashboard', component: () => import('./pages/Dashboard.vue') },
                 { path: 'members', name: 'members', component: () => import('./pages/Members.vue') },
                 {
                     path: 'members/:member(\\d+)',
@@ -18,6 +18,8 @@ export const router = createRouter({
                 { path: 'chats', name: 'chats', component: () => import('./pages/Chats.vue') },
                 { path: 'wardrobe', name: 'wardrobe', component: () => import('./pages/Wardrobe.vue') },
                 { path: 'friends', name: 'friends', component: () => import('./pages/Friends.vue') },
+                { path: 'beeps', name: 'beeps', component: () => import('./pages/Beeps.vue') },
+                { path: 'search', name: 'search', component: () => import('./pages/Search.vue') },
                 {
                     path: 'chats/:channel(\\d+)',
                     name: 'chatroom',

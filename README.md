@@ -77,6 +77,17 @@ refresh to re-inject.
 `scripts/manifest.mjs` is the single source of truth for game domains; watch/dev
 builds get the dev origins appended and the name suffixed with "(Dev)".
 
+## Versioning
+
+[Semver](https://semver.org/): **major** = breaking change to the database schema or backup
+format without migration, **minor** = new features, **patch** = fixes. `package.json` is the
+single source of truth — the manifest version and the in-app/mod version constants are all
+generated from it at build time.
+
+Cut a release with `yarn release:patch|minor|major` — this bumps the version, makes the
+version commit + git tag (`vX.Y.Z`), and rebuilds `dist/`. Note Chrome manifests don't allow
+pre-release suffixes (`-beta` etc.), so plain `X.Y.Z` only.
+
 ## Status / roadmap
 
 Core capture loop and browsing UI are in place. Not yet ported from the old system:

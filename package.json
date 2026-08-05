@@ -8,12 +8,16 @@
         "dev": "node scripts/build.mjs --watch",
         "build": "node scripts/build.mjs",
         "type-check": "vue-tsc --build",
-        "lint": "eslint . --fix"
+        "lint": "eslint . --fix",
+        "release:patch": "yarn version --patch && yarn build",
+        "release:minor": "yarn version --minor && yarn build",
+        "release:major": "yarn version --major && yarn build"
     },
     "dependencies": {
         "bc-data": "^130.0.0",
         "bondage-club-mod-sdk": "^1.2.0",
         "dexie": "^4.0.11",
+        "lz-string": "^1.5.0",
         "pinia": "^3.0.2",
         "reka-ui": "^2.3.0",
         "vue": "^3.5.16",

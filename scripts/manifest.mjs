@@ -27,8 +27,9 @@ export function buildManifest({ dev, version }) {
         action: {
             default_icon: 'bclub-logo.png',
             default_title: 'BC Toolbox',
+            default_popup: 'popup.html',
         },
-        permissions: ['storage', 'tabs', 'downloads'],
+        permissions: ['storage', 'tabs', 'downloads', 'notifications', 'alarms'],
         host_permissions: matches,
         background: {
             service_worker: 'background.js',

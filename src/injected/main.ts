@@ -242,7 +242,11 @@ function boot() {
                         type: data.Type,
                         content: data.Content ?? '',
                         dictionary: sanitize(data.Dictionary) as unknown[] | undefined,
-                        target: metadata?.TargetMemberNumber,
+                        // Plain whispers carry the target on the message itself,
+                        // not in the extracted metadata.
+                        target:
+                            metadata?.TargetMemberNumber ??
+                            (typeof data.Target === 'number' ? data.Target : undefined),
                         rendered: typeof msg === 'string' && msg.trim() ? msg.trim() : undefined,
                     },
                     timestamp: Date.now(),

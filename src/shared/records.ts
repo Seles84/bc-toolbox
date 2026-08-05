@@ -53,6 +53,8 @@ export interface MemberRecord {
     appearanceImage?: string;
     /** Detected addons (LSCG/FBC/etc.) as raw blobs */
     addons?: Record<string, unknown>;
+    /** Previous names/nicknames, appended whenever a capture changes them */
+    nameHistory?: { name?: string; nickname?: string; changed: number }[];
     /** Last time any of the above was refreshed */
     capturedAt: number;
 }
@@ -102,6 +104,35 @@ export interface MemberSeenRecord {
     firstSeen: number;
     lastSeen: number;
     lastLocation?: string;
+}
+
+/** One beep sent or received by one of the player's characters — `beeps` table. */
+export interface BeepRecord {
+    id?: number;
+    /** The logged-in character on our side */
+    viewer: number;
+    /** The other party */
+    member: number;
+    memberName?: string;
+    direction: 'in' | 'out';
+    /** Attached message text, when the beep carried one */
+    message?: string;
+    /** Addon metadata parsed off the message (FBC/WCE messageType, color…) */
+    metadata?: Record<string, unknown>;
+    /** Where the other party was when they beeped us (incoming only) */
+    roomName?: string;
+    created: number;
+}
+
+/** Personal note + tags about a member, per observing character — `notes` table. */
+export interface MemberNoteRecord {
+    id?: number;
+    member: number;
+    /** The character whose note this is */
+    viewer: number;
+    note: string;
+    tags: string[];
+    updated: number;
 }
 
 /** One login session of one of the player's characters — `playerSessions` table. */

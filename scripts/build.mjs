@@ -96,7 +96,10 @@ function buildUi() {
             target: 'es2022',
             sourcemap: watch ? 'inline' : false,
             rollupOptions: {
-                input: { index: resolve(root, 'index.html') },
+                input: {
+                    index: resolve(root, 'index.html'),
+                    popup: resolve(root, 'popup.html'),
+                },
             },
         },
     });

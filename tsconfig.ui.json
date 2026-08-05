@@ -1,6 +1,13 @@
 {
     "extends": "./tsconfig.base.json",
-    "include": ["src/ui/**/*", "src/ui/**/*.vue", "src/shared/**/*", "env.d.ts"],
+    "include": [
+        "src/ui/**/*",
+        "src/ui/**/*.vue",
+        "src/popup/**/*",
+        "src/popup/**/*.vue",
+        "src/shared/**/*",
+        "env.d.ts"
+    ],
     "compilerOptions": {
         "tsBuildInfoFile": "node_modules/.tmp/tsconfig.ui.tsbuildinfo",
         "lib": ["ES2022", "DOM", "DOM.Iterable"],

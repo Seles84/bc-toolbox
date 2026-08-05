@@ -37,6 +37,13 @@ onUnmounted(() => clearInterval(poll));
 
                 <nav v-if="session.viewer" class="flex items-center gap-1 text-sm">
                     <RouterLink
+                        :to="{ name: 'dashboard', params: { viewer: session.viewer } }"
+                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
+                        exact-active-class="!text-white bg-white/10"
+                    >
+                        Overview
+                    </RouterLink>
+                    <RouterLink
                         :to="{ name: 'members', params: { viewer: session.viewer } }"
                         class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
                         active-class="!text-white bg-white/10"
@@ -49,6 +56,13 @@ onUnmounted(() => clearInterval(poll));
                         active-class="!text-white bg-white/10"
                     >
                         Chats
+                    </RouterLink>
+                    <RouterLink
+                        :to="{ name: 'beeps', params: { viewer: session.viewer } }"
+                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
+                        active-class="!text-white bg-white/10"
+                    >
+                        Beeps
                     </RouterLink>
                     <RouterLink
                         :to="{ name: 'friends', params: { viewer: session.viewer } }"
@@ -64,12 +78,20 @@ onUnmounted(() => clearInterval(poll));
                     >
                         Wardrobe
                     </RouterLink>
+                    <RouterLink
+                        :to="{ name: 'search', params: { viewer: session.viewer } }"
+                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
+                        active-class="!text-white bg-white/10"
+                    >
+                        Search
+                    </RouterLink>
                 </nav>
 
                 <div class="ml-auto flex items-center gap-3">
-                    <div
+                    <RouterLink
                         v-if="session.viewerName"
-                        class="flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-sm"
+                        :to="{ name: 'dashboard', params: { viewer: session.viewer } }"
+                        class="flex items-center gap-2 rounded-full bg-surface-2 px-3 py-1 text-sm hover:bg-surface-3"
                     >
                         <span
                             class="h-2 w-2 rounded-full"
@@ -78,7 +100,7 @@ onUnmounted(() => clearInterval(poll));
                         />
                         <span class="text-neutral-200">{{ session.viewerName }}</span>
                         <span class="text-neutral-500">#{{ session.viewer }}</span>
-                    </div>
+                    </RouterLink>
                     <RouterLink
                         to="/settings"
                         class="rounded-md px-3 py-1.5 text-sm text-neutral-400 hover:text-white hover:bg-white/5"

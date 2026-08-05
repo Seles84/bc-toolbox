@@ -10,7 +10,8 @@ import {
     type ApiResponse,
     type PageMessage,
 } from '@/shared/protocol';
-import { handlePageMessage } from './capture';
+import { handlePageMessage, storeCapturedProfile } from './capture';
+import { initBackups } from './backup';
 import { allTabs, findTabByMember, getTab, queryPage, removeTab, statusOf } from './state';
 
 // -- Relay ports from game tabs ---------------------------------------------
@@ -64,7 +65,14 @@ const handlers: {
         if (!tab) {
             return { success: false, error: `No live game tab for member ${memberNumber}` };
         }
-        return queryPage(tab, query);
+        const result = await queryPage(tab, query);
+        // Freshly pulled profiles go straight into the database.
+        if (result.success && query.type === 'character-data') {
+            await storeCapturedProfile(result.data as import('@/shared/protocol').CapturedProfile).catch(
+                (error) => console.error('[BCT] failed to store pulled profile', error),
+            );
+        }
+        return result;
     },
 };
 
@@ -89,8 +97,16 @@ async function dispatch(request: ApiRequest): Promise<ApiResponse> {
     }
 }
 
-// -- Toolbar button opens the UI --------------------------------------------
+// -- Notification click → open that member's profile -------------------------
 
-chrome.action.onClicked.addListener(() => {
-    void chrome.tabs.create({ url: chrome.runtime.getURL('index.html') });
+chrome.notifications.onClicked.addListener((id) => {
+    const match = id.match(/^bct-friend:(\d+):(\d+)$/);
+    if (match) {
+        void chrome.tabs.create({
+            url: chrome.runtime.getURL(`index.html#/c/${match[1]}/members/${match[2]}`),
+        });
+        void chrome.notifications.clear(id);
+    }
 });
+
+initBackups();

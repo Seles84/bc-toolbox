@@ -5,6 +5,7 @@ import { db } from '@/shared/db';
 import type { MemberRecord, MemberSeenRecord } from '@/shared/records';
 import { useLiveQuery } from '../composables/useLiveQuery';
 import { useSessionStore } from '../stores/session';
+import { tagClass } from '../utils/tags';
 
 const PAGE_SIZE = 48;
 
@@ -15,6 +16,7 @@ const viewer = computed(() => Number(route.params.viewer));
 const search = ref('');
 const query = ref('');
 const page = ref(1);
+const tagFilter = ref('');
 
 let debounce: ReturnType<typeof setTimeout> | undefined;
 watch(search, () => {
@@ -29,18 +31,35 @@ interface MembersData {
     rows: MemberRecord[];
     total: number;
     seen: Map<number, MemberSeenRecord>;
+    tags: Map<number, string[]>;
+    allTags: string[];
 }
 
 const data = useLiveQuery<MembersData>(
     async () => {
+        const noteRows = await db.notes.where('viewer').equals(viewer.value).toArray();
+        const tags = new Map(noteRows.filter((n) => n.tags.length).map((n) => [n.member, n.tags]));
+        const allTags = [...new Set(noteRows.flatMap((n) => n.tags))].sort();
+
         let collection = db.members.orderBy('name');
+        if (tagFilter.value) {
+            const wanted = tagFilter.value.toLowerCase();
+            collection = collection.filter((m) =>
+                (tags.get(m.memberNumber) ?? []).some((t) => t.toLowerCase() === wanted),
+            );
+        }
         const q = query.value;
         if (q) {
             collection = collection.filter(
                 (m) =>
                     m.name.toLowerCase().includes(q) ||
                     (m.nickname ?? '').toLowerCase().includes(q) ||
-                    String(m.memberNumber).includes(q),
+                    String(m.memberNumber).includes(q) ||
+                    (m.nameHistory ?? []).some(
+                        (h) =>
+                            (h.name ?? '').toLowerCase().includes(q) ||
+                            (h.nickname ?? '').toLowerCase().includes(q),
+                    ),
             );
         }
         const total = await collection.clone().count();
@@ -49,10 +68,10 @@ const data = useLiveQuery<MembersData>(
             .limit(PAGE_SIZE)
             .toArray();
         const seenRows = await db.memberSeen.where('viewer').equals(viewer.value).toArray();
-        return { rows, total, seen: new Map(seenRows.map((s) => [s.member, s])) };
+        return { rows, total, seen: new Map(seenRows.map((s) => [s.member, s])), tags, allTags };
     },
-    [query, page, viewer],
-    { rows: [], total: 0, seen: new Map() },
+    [query, page, viewer, tagFilter],
+    { rows: [], total: 0, seen: new Map(), tags: new Map(), allTags: [] },
 );
 
 const pages = computed(() => Math.max(1, Math.ceil(data.value.total / PAGE_SIZE)));
@@ -71,7 +90,13 @@ function formatDate(timestamp?: number): string {
         <div class="mb-5 flex flex-wrap items-center gap-4">
             <h1 class="text-2xl font-semibold text-white">Members</h1>
             <span class="text-sm text-neutral-500">{{ data.total }} known</span>
-            <input v-model="search" class="input ml-auto max-w-xs" placeholder="Search name or ID…" />
+            <div class="ml-auto flex items-center gap-2">
+                <select v-if="data.allTags.length" v-model="tagFilter" class="input w-auto py-1.5">
+                    <option value="">All tags</option>
+                    <option v-for="tag in data.allTags" :key="tag" :value="tag">{{ tag }}</option>
+                </select>
+                <input v-model="search" class="input max-w-xs" placeholder="Search name or ID…" />
+            </div>
         </div>
 
         <div class="grid grid-cols-2 gap-4 sm:grid-cols-3 lg:grid-cols-4 xl:grid-cols-6">
@@ -105,6 +130,15 @@ function formatDate(timestamp?: number): string {
                         </span>
                     </div>
                     <div class="text-xs text-neutral-500">#{{ member.memberNumber }}</div>
+                    <div v-if="data.tags.get(member.memberNumber)?.length" class="flex flex-wrap gap-1">
+                        <span
+                            v-for="tag in data.tags.get(member.memberNumber)!.slice(0, 3)"
+                            :key="tag"
+                            class="rounded px-1 py-px text-[10px] font-medium"
+                            :class="tagClass(tag)"
+                            >{{ tag }}</span
+                        >
+                    </div>
                     <div class="text-xs text-neutral-500">
                         Seen {{ formatDate(data.seen.get(member.memberNumber)?.lastSeen) }}
                         <template v-if="data.seen.get(member.memberNumber)?.lastLocation">

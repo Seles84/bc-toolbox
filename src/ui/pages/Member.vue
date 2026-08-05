@@ -1,11 +1,15 @@
 <script setup lang="ts">
-import { computed, ref } from 'vue';
+import { computed, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import { db } from '@/shared/db';
 import type { MemberRecord, MemberSeenRecord } from '@/shared/records';
 import BioText from '../components/BioText.vue';
 import { useLiveQuery } from '../composables/useLiveQuery';
 import RelationshipsGraph from '../components/RelationshipsGraph.vue';
+import { PRESET_TAGS, tagClass } from '../utils/tags';
+import { api } from '../api';
+import { useSessionStore } from '../stores/session';
+import { decodeDescription } from '@/shared/description';
 import {
     collarStateLabel,
     daysSince,
@@ -21,7 +25,9 @@ const route = useRoute();
 const viewer = computed(() => Number(route.params.viewer));
 const memberNumber = computed(() => Number(route.params.member));
 
-const tab = ref<'stats' | 'bio' | 'crafted' | 'relationships' | 'skills' | 'addons'>('stats');
+const tab = ref<
+    'stats' | 'bio' | 'crafted' | 'relationships' | 'skills' | 'addons' | 'whispers' | 'notes'
+>('stats');
 const graphDepth = ref(3);
 
 const DEPTHS = [
@@ -38,6 +44,8 @@ const TABS = [
     { id: 'relationships', label: 'Relationships' },
     { id: 'skills', label: 'Skills' },
     { id: 'addons', label: 'Addons' },
+    { id: 'whispers', label: 'Whispers' },
+    { id: 'notes', label: 'Notes' },
 ] as const;
 
 function subsOf(ownerNumber: number): Promise<MemberRecord[]> {
@@ -81,6 +89,181 @@ const member = computed(() => profile.value.member);
 const seen = computed(() => profile.value.seen);
 const submissives = computed(() => profile.value.submissives);
 const collarSiblings = computed(() => profile.value.collarSiblings);
+
+// -- On-demand profile refresh ------------------------------------------------
+
+const session = useSessionStore();
+const refreshing = ref(false);
+const refreshError = ref<string | null>(null);
+const refreshedAt = ref<number | null>(null);
+
+/** Pull fresh data live from the game — works when both are in the same room. */
+async function refreshProfile() {
+    refreshing.value = true;
+    refreshError.value = null;
+    try {
+        const result = await api('page.query', {
+            memberNumber: viewer.value,
+            query: { type: 'character-data', memberNumber: memberNumber.value },
+        });
+        if (result.success) {
+            refreshedAt.value = Date.now();
+        } else {
+            refreshError.value = result.error;
+        }
+    } catch (error) {
+        refreshError.value = error instanceof Error ? error.message : String(error);
+    } finally {
+        refreshing.value = false;
+    }
+}
+
+// -- Whisper history ---------------------------------------------------------
+
+interface WhisperEntry {
+    line: import('@/shared/records').ChatLogRecord;
+    roomName?: string;
+    /** Set on the first line of each room visit — renders a divider */
+    divider?: string;
+}
+
+const whispers = useLiveQuery<WhisperEntry[]>(
+    async () => {
+        const me = viewer.value;
+        const them = memberNumber.value;
+        const lines = await db.chat
+            .where('sender')
+            .anyOf([me, them])
+            .filter(
+                (l) =>
+                    l.type === 'Whisper' &&
+                    // target === undefined covers incoming whispers stored
+                    // before capture recorded the implicit target (us).
+                    ((l.sender === them && (l.target === me || l.target === undefined)) ||
+                        (l.sender === me && l.target === them)),
+            )
+            .sortBy('created');
+
+        const channelIds = [...new Set(lines.map((l) => l.channelId))];
+        const channels = await db.chatChannels.bulkGet(channelIds);
+        const roomById = new Map(channels.filter((c) => !!c).map((c) => [c!.id!, c!.roomName]));
+
+        let lastChannel: number | null = null;
+        return lines.map((line) => {
+            const entry: WhisperEntry = { line, roomName: roomById.get(line.channelId) };
+            if (line.channelId !== lastChannel) {
+                lastChannel = line.channelId;
+                entry.divider = `${roomById.get(line.channelId) ?? 'Unknown room'} · ${new Date(line.created).toLocaleString()}`;
+            }
+            return entry;
+        });
+    },
+    [memberNumber, viewer],
+    [],
+);
+
+// -- Whisper sending ---------------------------------------------------------
+
+const whisperDraft = ref('');
+const whisperSending = ref(false);
+const whisperError = ref<string | null>(null);
+
+async function sendWhisper() {
+    const text = whisperDraft.value.trim();
+    if (!text || whisperSending.value) return;
+    whisperSending.value = true;
+    whisperError.value = null;
+    try {
+        const result = await api('page.query', {
+            memberNumber: viewer.value,
+            query: { type: 'send-whisper', target: memberNumber.value, message: text },
+        });
+        if (result.success) {
+            whisperDraft.value = ''; // the line arrives via live capture
+        } else {
+            whisperError.value = result.error;
+        }
+    } catch (error) {
+        whisperError.value = error instanceof Error ? error.message : String(error);
+    } finally {
+        whisperSending.value = false;
+    }
+}
+
+// -- Notes & tags ------------------------------------------------------------
+
+const savedNote = useLiveQuery(
+    async () =>
+        (await db.notes
+            .where('[member+viewer]')
+            .equals([memberNumber.value, viewer.value])
+            .first()) ?? null,
+    [memberNumber, viewer],
+    null as import('@/shared/records').MemberNoteRecord | null,
+);
+
+const noteText = ref('');
+const noteTags = ref<string[]>([]);
+const customTag = ref('');
+const noteDirty = ref(false);
+const noteSavedAt = ref<number | null>(null);
+
+watch(
+    [memberNumber, savedNote],
+    ([, record], [previousMember]) => {
+        // Seed the editor from storage on member switch or first load; don't
+        // clobber unsaved edits when the live query re-emits.
+        if (memberNumber.value !== previousMember || !noteDirty.value) {
+            noteText.value = record?.note ?? '';
+            noteTags.value = [...(record?.tags ?? [])];
+            if (memberNumber.value !== previousMember) {
+                noteDirty.value = false;
+                noteSavedAt.value = null;
+            }
+        }
+    },
+    { immediate: true },
+);
+
+function toggleTag(tag: string) {
+    const index = noteTags.value.findIndex((t) => t.toLowerCase() === tag.toLowerCase());
+    if (index >= 0) {
+        noteTags.value.splice(index, 1);
+    } else {
+        noteTags.value.push(tag);
+    }
+    noteDirty.value = true;
+}
+
+function addCustomTag() {
+    const tag = customTag.value.trim();
+    if (tag && !noteTags.value.some((t) => t.toLowerCase() === tag.toLowerCase())) {
+        noteTags.value.push(tag);
+        noteDirty.value = true;
+    }
+    customTag.value = '';
+}
+
+async function saveNote() {
+    const record = {
+        member: memberNumber.value,
+        viewer: viewer.value,
+        note: noteText.value,
+        tags: noteTags.value,
+        updated: Date.now(),
+    };
+    const existing = savedNote.value;
+    if (existing?.id !== undefined) {
+        await db.notes.update(existing.id, record);
+    } else {
+        await db.notes.add(record);
+    }
+    noteDirty.value = false;
+    noteSavedAt.value = Date.now();
+}
+
+/** Bios stored before capture-side decompression may still be compressed. */
+const bio = computed(() => decodeDescription(member.value?.description));
 
 const dominance = computed(() => dominanceInfo(member.value));
 const pronouns = computed(() => pronounsInfo(member.value?.pronouns));
@@ -201,7 +384,48 @@ const stats = computed(() => {
             <h1 class="text-3xl font-semibold" :style="{ color: member.labelColor || '#ffffff' }">
                 {{ member.nickname || member.name }}
             </h1>
-            <p class="mb-1 text-sm text-neutral-500">{{ member.name }} · #{{ member.memberNumber }}</p>
+            <div class="mb-1 flex flex-wrap items-center gap-3">
+                <p class="text-sm text-neutral-500">{{ member.name }} · #{{ member.memberNumber }}</p>
+                <button
+                    v-if="session.viewerOnline && memberNumber !== viewer"
+                    class="btn px-2 py-0.5 text-xs"
+                    :disabled="refreshing"
+                    title="Pull fresh profile data from the game — you need to be in the same room"
+                    @click="refreshProfile"
+                >
+                    {{ refreshing ? 'Updating…' : 'Update now' }}
+                </button>
+                <span v-if="refreshedAt" class="text-xs text-emerald-400">Updated</span>
+                <span v-if="refreshError" class="text-xs text-red-400">{{ refreshError }}</span>
+                <RouterLink
+                    v-if="memberNumber !== viewer"
+                    :to="{ name: 'beeps', params: { viewer }, query: { member: memberNumber } }"
+                    class="btn px-2 py-0.5 text-xs"
+                    title="Open the beep conversation with this member"
+                >
+                    Beep
+                </RouterLink>
+            </div>
+            <p v-if="member.nameHistory?.length" class="mb-1 text-xs text-neutral-600">
+                Previously:
+                <template v-for="(entry, index) in member.nameHistory.slice().reverse()" :key="index">
+                    <span :title="new Date(entry.changed).toLocaleString()">
+                        {{ entry.nickname || entry.name
+                        }}<template v-if="entry.nickname && entry.name && entry.nickname !== entry.name">
+                            ({{ entry.name }})</template
+                        ></span
+                    ><template v-if="index < member.nameHistory.length - 1">, </template>
+                </template>
+            </p>
+            <div v-if="noteTags.length" class="mb-2 flex flex-wrap gap-1.5">
+                <span
+                    v-for="noteTag in noteTags"
+                    :key="noteTag"
+                    class="rounded px-1.5 py-0.5 text-[11px] font-medium"
+                    :class="tagClass(noteTag)"
+                    >{{ noteTag }}</span
+                >
+            </div>
             <p v-if="ownership?.Name" class="mb-4 text-sm text-neutral-400">
                 {{ collarStateLabel(ownership.Stage) }} by
                 <RouterLink
@@ -247,8 +471,8 @@ const stats = computed(() => {
 
                     <!-- Bio -->
                     <div v-else-if="tab === 'bio'">
-                        <BioText v-if="member.description" :text="member.description" />
-                        <p v-else class="text-sm text-neutral-500">No bio captured.</p>
+                        <BioText v-if="bio" :text="bio" />
+                        <p v-else class="text-sm text-neutral-500">No bio recorded.</p>
                     </div>
 
                     <!-- Crafted items -->
@@ -280,7 +504,7 @@ const stats = computed(() => {
                                 </tr>
                             </tbody>
                         </table>
-                        <p v-else class="text-sm text-neutral-500">No crafted items captured.</p>
+                        <p v-else class="text-sm text-neutral-500">No crafted items recorded.</p>
                     </div>
 
                     <!-- Relationships -->
@@ -429,7 +653,145 @@ const stats = computed(() => {
                                 </tr>
                             </tbody>
                         </table>
-                        <p v-else class="text-sm text-neutral-500">No skills captured.</p>
+                        <p v-else class="text-sm text-neutral-500">No skills recorded.</p>
+                    </div>
+
+                    <!-- Whispers -->
+                    <div v-else-if="tab === 'whispers'">
+                        <p v-if="whispers.length === 0" class="text-sm text-neutral-500">
+                            No whispers recorded with this member.
+                        </p>
+                        <div v-else class="max-h-[60vh] space-y-1.5 overflow-y-auto pr-1">
+                            <template v-for="entry in whispers" :key="entry.line.id">
+                                <p
+                                    v-if="entry.divider"
+                                    class="pt-3 pb-1 text-center text-[11px] text-neutral-600 first:pt-0"
+                                >
+                                    — {{ entry.divider }} —
+                                </p>
+                                <div
+                                    class="flex"
+                                    :class="
+                                        entry.line.sender === viewer ? 'justify-end' : 'justify-start'
+                                    "
+                                >
+                                    <div
+                                        class="max-w-[75%] rounded-lg px-3 py-1.5"
+                                        :class="
+                                            entry.line.sender === viewer
+                                                ? 'bg-accent/20 text-neutral-100'
+                                                : 'bg-surface-2 text-neutral-200'
+                                        "
+                                    >
+                                        <p class="text-sm whitespace-pre-wrap">{{ entry.line.message }}</p>
+                                        <p class="mt-0.5 text-[10px] text-neutral-500">
+                                            {{
+                                                new Date(entry.line.created).toLocaleTimeString([], {
+                                                    hour: '2-digit',
+                                                    minute: '2-digit',
+                                                })
+                                            }}
+                                        </p>
+                                    </div>
+                                </div>
+                            </template>
+                        </div>
+
+                        <form
+                            class="mt-3 border-t border-white/10 pt-3"
+                            @submit.prevent="sendWhisper"
+                        >
+                            <div class="flex gap-2">
+                                <input
+                                    v-model="whisperDraft"
+                                    class="input flex-1"
+                                    :disabled="!session.viewerOnline || whisperSending"
+                                    :placeholder="
+                                        session.viewerOnline
+                                            ? 'Whisper… (they must be in your room)'
+                                            : 'Your character must be online to whisper'
+                                    "
+                                />
+                                <button
+                                    type="submit"
+                                    class="btn btn-accent"
+                                    :disabled="
+                                        !session.viewerOnline || whisperSending || !whisperDraft.trim()
+                                    "
+                                >
+                                    {{ whisperSending ? 'Sending…' : 'Send' }}
+                                </button>
+                            </div>
+                            <p v-if="whisperError" class="mt-2 text-xs text-red-400">
+                                {{ whisperError }}
+                            </p>
+                        </form>
+                    </div>
+
+                    <!-- Notes -->
+                    <div v-else-if="tab === 'notes'" class="space-y-4">
+                        <div>
+                            <h3 class="mb-2 text-sm font-semibold text-neutral-400">Tags</h3>
+                            <div class="flex flex-wrap items-center gap-1.5">
+                                <button
+                                    v-for="preset in PRESET_TAGS"
+                                    :key="preset.tag"
+                                    class="rounded px-2 py-0.5 text-xs font-medium transition-opacity"
+                                    :class="[
+                                        preset.class,
+                                        noteTags.some((t) => t.toLowerCase() === preset.tag.toLowerCase())
+                                            ? ''
+                                            : 'opacity-35 hover:opacity-70',
+                                    ]"
+                                    @click="toggleTag(preset.tag)"
+                                >
+                                    {{ preset.tag }}
+                                </button>
+                                <span
+                                    v-for="custom in noteTags.filter(
+                                        (t) =>
+                                            !PRESET_TAGS.some(
+                                                (p) => p.tag.toLowerCase() === t.toLowerCase(),
+                                            ),
+                                    )"
+                                    :key="custom"
+                                    class="flex items-center gap-1 rounded px-2 py-0.5 text-xs font-medium"
+                                    :class="tagClass(custom)"
+                                >
+                                    {{ custom }}
+                                    <button class="hover:text-white" @click="toggleTag(custom)">×</button>
+                                </span>
+                                <input
+                                    v-model="customTag"
+                                    class="input w-32 py-0.5 text-xs"
+                                    placeholder="Add tag…"
+                                    @keydown.enter.prevent="addCustomTag"
+                                />
+                            </div>
+                            <p class="mt-2 text-xs text-neutral-600">
+                                Members tagged <span class="text-sky-300">Watch</span> trigger a
+                                desktop notification when they come online.
+                            </p>
+                        </div>
+
+                        <div>
+                            <h3 class="mb-2 text-sm font-semibold text-neutral-400">Note</h3>
+                            <textarea
+                                v-model="noteText"
+                                rows="8"
+                                class="input resize-y font-normal"
+                                placeholder="Private notes about this member — only stored in your local database."
+                                @input="noteDirty = true"
+                            ></textarea>
+                        </div>
+
+                        <div class="flex items-center gap-3">
+                            <button class="btn btn-accent" :disabled="!noteDirty" @click="saveNote">
+                                Save
+                            </button>
+                            <span v-if="noteDirty" class="text-xs text-amber-400">Unsaved changes</span>
+                            <span v-else-if="noteSavedAt" class="text-xs text-emerald-400">Saved</span>
+                        </div>
                     </div>
 
                     <!-- Addons -->
@@ -464,6 +826,6 @@ const stats = computed(() => {
     </div>
 
     <div v-else class="card mx-auto max-w-md p-8 text-center text-neutral-400">
-        Member #{{ memberNumber }} has not been captured yet.
+        You haven't met member #{{ memberNumber }} yet.
     </div>
 </template>

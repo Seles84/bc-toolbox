@@ -2,8 +2,8 @@
  * Handles live queries from the UI (routed background → relay → here):
  * lookups against game state that only exists in the page.
  */
-import type { PageQuery, PageQueryResult, WardrobeSlotInfo } from '@/shared/protocol';
-import { buildProfile, cropCanvas } from './profile';
+import type { PageQuery, PageQueryResult, RosterMember, WardrobeSlotInfo } from '@/shared/protocol';
+import { buildProfile, canvasToDataUrl, cropCanvas } from './profile';
 
 export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
     switch (query.type) {
@@ -53,6 +53,61 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
             }));
             return { success: true, data: { slots } };
         }
+
+        case 'room-roster': {
+            if (!Player?.MemberNumber) {
+                return { success: false, error: 'Not logged in' };
+            }
+            if (!ChatRoomData || !ChatRoomCharacter?.length) {
+                return { success: false, error: 'Not in a chat room' };
+            }
+            const members: RosterMember[] = ChatRoomCharacter.filter(
+                (c) => typeof c.MemberNumber === 'number',
+            ).map((c) => ({
+                memberNumber: c.MemberNumber!,
+                name: c.Name,
+                nickname: c.Nickname,
+                labelColor: c.LabelColor,
+                isPlayer: c.IsPlayer(),
+            }));
+            return { success: true, data: { members } };
+        }
+
+        case 'send-whisper': {
+            if (!Player?.MemberNumber) {
+                return { success: false, error: 'Not logged in' };
+            }
+            if (CurrentScreen !== 'ChatRoom') {
+                return { success: false, error: 'Your character is not in a chat room' };
+            }
+            if (!ChatRoomCharacter?.some((c) => c.MemberNumber === query.target)) {
+                return { success: false, error: 'They are not in your room' };
+            }
+            // The game's own send path: garbling, range checks and the local
+            // echo (which our chat capture stores) all apply as normal.
+            const result = ChatRoomSendWhisper(query.target, query.message);
+            if (result === 'target-gone') {
+                return { success: false, error: 'They just left the room' };
+            }
+            if (result === 'target-out-of-range') {
+                return { success: false, error: 'They are out of whisper range' };
+            }
+            return { success: true, data: null };
+        }
+
+        case 'send-beep': {
+            if (!Player?.MemberNumber) {
+                return { success: false, error: 'Not logged in' };
+            }
+            // Same shape as the WCE instant messenger's sends.
+            ServerSend('AccountBeep', {
+                MemberNumber: query.target,
+                BeepType: '',
+                IsSecret: true,
+                Message: query.message,
+            });
+            return { success: true, data: null };
+        }
     }
 }
 
@@ -85,7 +140,7 @@ async function renderWardrobeCanvases(): Promise<void> {
 
 function safeDataUrl(canvas: HTMLCanvasElement): string | undefined {
     try {
-        return cropCanvas(canvas)?.toDataURL('image/png');
+        return canvasToDataUrl(cropCanvas(canvas));
     } catch {
         return undefined;
     }

@@ -109,7 +109,7 @@ const TYPE_BADGES: Record<string, { label: string; class: string }> = {
         </div>
 
         <div v-if="rows.length === 0" class="card mx-auto max-w-md p-8 text-center text-neutral-400">
-            No friends captured for this character yet — the list is read at login.
+            No friends known for this character yet — the list is read at login.
         </div>
 
         <div v-else class="card divide-y divide-white/5">

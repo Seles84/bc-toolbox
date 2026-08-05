@@ -11,7 +11,7 @@ onMounted(() => {
 });
 
 function pick(memberNumber: number) {
-    void router.push({ name: 'members', params: { viewer: memberNumber } });
+    void router.push({ name: 'dashboard', params: { viewer: memberNumber } });
 }
 </script>
 
@@ -26,7 +26,7 @@ function pick(memberNumber: number) {
             v-if="session.characters.length === 0"
             class="card mx-auto max-w-xl p-8 text-center text-neutral-400"
         >
-            <p class="mb-2 text-lg text-neutral-200">No characters captured yet</p>
+            <p class="mb-2 text-lg text-neutral-200">No characters yet</p>
             <p class="text-sm leading-relaxed">
                 Log into Bondage Club in a tab with the extension enabled and your character will
                 appear here automatically.

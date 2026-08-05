@@ -195,7 +195,7 @@ function openMember(id: number) {
                             fill="#737373"
                             font-size="10"
                         >
-                            {{ node.id > 0 ? `#${node.id}` : 'unknown' }}
+                            {{ node.id > 0 ? `#${node.id}` : 'not met' }}
                         </text>
                     </g>
                 </g>

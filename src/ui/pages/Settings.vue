@@ -1,7 +1,13 @@
 <script setup lang="ts">
-import { computed, onMounted, ref } from 'vue';
+import { computed, onMounted, ref, watch } from 'vue';
 import { db } from '@/shared/db';
 import { api } from '../api';
+
+interface BackupSettings {
+    enabled: boolean;
+    intervalDays: number;
+    keep: number;
+}
 
 const EXPORT_FORMAT = 'bc-toolbox';
 
@@ -36,6 +42,220 @@ async function refreshCounts() {
     }
 }
 
+// -- Automatic backups -------------------------------------------------------
+
+const backup = ref<BackupSettings>({ enabled: false, intervalDays: 7, keep: 4 });
+const lastAutoBackup = ref<number | null>(null);
+let backupLoaded = false;
+
+watch(
+    backup,
+    () => {
+        if (backupLoaded) {
+            void chrome.storage.local.set({ autoBackup: { ...backup.value } });
+        }
+    },
+    { deep: true },
+);
+
+// -- Retention pruning -------------------------------------------------------
+
+const pruneMonths = ref(6);
+const pruning = ref(false);
+const prunePreview = ref<{ sessions: number; channels: number; chat: number; beeps: number } | null>(
+    null,
+);
+const pruneDone = ref<string | null>(null);
+
+function pruneCutoff(): number {
+    return Date.now() - pruneMonths.value * 30.44 * 86_400_000;
+}
+
+async function collectPrunable() {
+    const cutoff = pruneCutoff();
+    const sessions = await db.playerSessions
+        .filter((s) => s.ended > 0 && s.ended < cutoff)
+        .toArray();
+    const sessionIds = new Set(sessions.map((s) => s.sessionId));
+    const channels = await db.chatChannels.filter((c) => sessionIds.has(c.sessionId)).toArray();
+    const channelIds = new Set(channels.map((c) => c.id!));
+    const chat = await db.chat.filter((l) => channelIds.has(l.channelId)).count();
+    const beeps = await db.beeps.filter((b) => b.created < cutoff).count();
+    return { sessions, channels, chatCount: chat, beepCount: beeps };
+}
+
+async function previewPrune() {
+    pruning.value = true;
+    pruneDone.value = null;
+    try {
+        const { sessions, channels, chatCount, beepCount } = await collectPrunable();
+        prunePreview.value = {
+            sessions: sessions.length,
+            channels: channels.length,
+            chat: chatCount,
+            beeps: beepCount,
+        };
+    } finally {
+        pruning.value = false;
+    }
+}
+
+async function applyPrune() {
+    pruning.value = true;
+    try {
+        const cutoff = pruneCutoff();
+        const { sessions, channels } = await collectPrunable();
+        const sessionIds = sessions.map((s) => s.id!);
+        const channelIds = channels.map((c) => c.id!);
+        const channelIdSet = new Set(channelIds);
+        await db.transaction('rw', [db.playerSessions, db.chatChannels, db.chat, db.beeps], async () => {
+            await db.chat.filter((l) => channelIdSet.has(l.channelId)).delete();
+            await db.chatChannels.bulkDelete(channelIds);
+            await db.playerSessions.bulkDelete(sessionIds);
+            await db.beeps.filter((b) => b.created < cutoff).delete();
+        });
+        pruneDone.value = `Pruned ${sessions.length} sessions, ${channels.length} room visits, ${prunePreview.value?.chat ?? '?'} chat lines, ${prunePreview.value?.beeps ?? '?'} beeps.`;
+        prunePreview.value = null;
+        await refreshCounts();
+    } finally {
+        pruning.value = false;
+    }
+}
+
+// -- Appearance image stats & pruning -----------------------------------------
+
+const imageStats = ref<{ count: number; bytes: number } | null>(null);
+
+async function refreshImageStats() {
+    let count = 0;
+    let bytes = 0;
+    await db.members.each((m) => {
+        if (m.appearanceImage) {
+            count++;
+            bytes += m.appearanceImage.length;
+        }
+    });
+    imageStats.value = { count, bytes };
+}
+
+/** Months, or 'all' for every non-player member. */
+const imagePruneScope = ref<number | 'all'>(6);
+const imagePruning = ref(false);
+const imagePrunePreview = ref<{ count: number; bytes: number } | null>(null);
+const imagePruneDone = ref<string | null>(null);
+
+async function collectPrunableImages(): Promise<{ members: number[]; bytes: number }> {
+    const cutoff =
+        imagePruneScope.value === 'all'
+            ? Infinity
+            : Date.now() - imagePruneScope.value * 30.44 * 86_400_000;
+
+    // Latest sighting by ANY of the player's characters.
+    const lastSeenByMember = new Map<number, number>();
+    await db.memberSeen.each((s) => {
+        lastSeenByMember.set(s.member, Math.max(lastSeenByMember.get(s.member) ?? 0, s.lastSeen));
+    });
+
+    const members: number[] = [];
+    let bytes = 0;
+    await db.members.each((m) => {
+        if (!m.appearanceImage || m.isPlayer) {
+            return; // your own characters' portraits are always kept
+        }
+        const lastSeen = Math.max(lastSeenByMember.get(m.memberNumber) ?? 0, m.capturedAt ?? 0);
+        if (lastSeen < cutoff) {
+            members.push(m.memberNumber);
+            bytes += m.appearanceImage.length;
+        }
+    });
+    return { members, bytes };
+}
+
+async function previewImagePrune() {
+    imagePruning.value = true;
+    imagePruneDone.value = null;
+    try {
+        const { members, bytes } = await collectPrunableImages();
+        imagePrunePreview.value = { count: members.length, bytes };
+    } finally {
+        imagePruning.value = false;
+    }
+}
+
+async function applyImagePrune() {
+    imagePruning.value = true;
+    try {
+        const { members, bytes } = await collectPrunableImages();
+        await db.members
+            .where('memberNumber')
+            .anyOf(members)
+            .modify((m) => {
+                delete m.appearanceImage;
+            });
+        imagePruneDone.value = `Removed ${members.length} images, freed ~${formatBytes(bytes)}.`;
+        imagePrunePreview.value = null;
+        await refreshImageStats();
+        await refreshCounts();
+    } finally {
+        imagePruning.value = false;
+    }
+}
+
+// -- Image re-encoding -------------------------------------------------------
+
+const reencoding = ref(false);
+const reencodeStatus = ref<string | null>(null);
+
+async function reencodeImages() {
+    reencoding.value = true;
+    reencodeStatus.value = null;
+    try {
+        const candidates = await db.members
+            .filter((m) => !!m.appearanceImage?.startsWith('data:image/png'))
+            .toArray();
+        let converted = 0;
+        let saved = 0;
+        for (const member of candidates) {
+            const webp = await pngToWebp(member.appearanceImage!);
+            if (webp && webp.length < member.appearanceImage!.length) {
+                saved += member.appearanceImage!.length - webp.length;
+                await db.members.update(member.memberNumber, { appearanceImage: webp });
+                converted++;
+            }
+            reencodeStatus.value = `Converting… ${converted}/${candidates.length}`;
+        }
+        reencodeStatus.value =
+            candidates.length === 0
+                ? 'No PNG images left to convert.'
+                : `Converted ${converted} images, saved ~${formatBytes(saved)}.`;
+        await refreshCounts();
+        await refreshImageStats();
+    } finally {
+        reencoding.value = false;
+    }
+}
+
+function pngToWebp(dataUrl: string): Promise<string | null> {
+    return new Promise((resolve) => {
+        const image = new Image();
+        image.onload = () => {
+            const canvas = document.createElement('canvas');
+            canvas.width = image.naturalWidth;
+            canvas.height = image.naturalHeight;
+            const ctx = canvas.getContext('2d');
+            if (!ctx) {
+                resolve(null);
+                return;
+            }
+            ctx.drawImage(image, 0, 0);
+            const webp = canvas.toDataURL('image/webp', 0.85);
+            resolve(webp.startsWith('data:image/webp') ? webp : null);
+        };
+        image.onerror = () => resolve(null);
+        image.src = dataUrl;
+    });
+}
+
 onMounted(async () => {
     try {
         const pong = await api('ping', undefined);
@@ -43,7 +263,12 @@ onMounted(async () => {
     } catch {
         version.value = 'background unreachable';
     }
+    const stored = await chrome.storage.local.get(['autoBackup', 'lastAutoBackup']);
+    backup.value = { ...backup.value, ...((stored.autoBackup as Partial<BackupSettings>) ?? {}) };
+    lastAutoBackup.value = (stored.lastAutoBackup as number) ?? null;
+    backupLoaded = true;
     await refreshCounts();
+    await refreshImageStats();
 });
 
 function formatBytes(bytes: number): string {
@@ -201,6 +426,130 @@ async function applyImport() {
                 <button class="btn" :disabled="measuring" @click="measureTables">
                     {{ measuring ? 'Measuring…' : 'Measure table sizes' }}
                 </button>
+            </div>
+        </div>
+
+        <div class="card mb-4 p-5">
+            <h2 class="mb-1 font-medium text-white">Automatic backups</h2>
+            <p class="mb-3 text-sm text-neutral-500">
+                Periodically exports the database to your Downloads folder (BC Toolbox/…).
+            </p>
+            <div class="flex flex-wrap items-center gap-4 text-sm">
+                <label class="flex cursor-pointer items-center gap-2 text-neutral-300">
+                    <input v-model="backup.enabled" type="checkbox" class="accent-accent" />
+                    Enabled
+                </label>
+                <label class="flex items-center gap-2 text-neutral-400">
+                    Every
+                    <select v-model.number="backup.intervalDays" class="input w-auto py-1">
+                        <option :value="1">day</option>
+                        <option :value="3">3 days</option>
+                        <option :value="7">week</option>
+                        <option :value="14">2 weeks</option>
+                        <option :value="30">month</option>
+                    </select>
+                </label>
+                <label class="flex items-center gap-2 text-neutral-400">
+                    Keep
+                    <select v-model.number="backup.keep" class="input w-auto py-1">
+                        <option v-for="n in [2, 4, 8, 12]" :key="n" :value="n">{{ n }}</option>
+                    </select>
+                    files
+                </label>
+                <span v-if="lastAutoBackup" class="text-xs text-neutral-600">
+                    Last: {{ new Date(lastAutoBackup).toLocaleString() }}
+                </span>
+            </div>
+        </div>
+
+        <div class="card mb-4 p-5">
+            <h2 class="mb-1 font-medium text-white">Storage management</h2>
+            <p class="mb-3 text-sm text-neutral-500">
+                Prune old chat history and shrink stored appearance images.
+            </p>
+
+            <div class="mb-4 flex flex-wrap items-center gap-3 text-sm">
+                <label class="flex items-center gap-2 text-neutral-400">
+                    Prune sessions older than
+                    <select v-model.number="pruneMonths" class="input w-auto py-1">
+                        <option :value="3">3 months</option>
+                        <option :value="6">6 months</option>
+                        <option :value="12">a year</option>
+                    </select>
+                </label>
+                <button class="btn" :disabled="pruning" @click="previewPrune">
+                    {{ pruning ? 'Working…' : 'Preview prune' }}
+                </button>
+            </div>
+
+            <div
+                v-if="prunePreview"
+                class="mb-4 rounded-md border border-amber-500/30 bg-amber-500/5 p-4 text-sm"
+            >
+                <p class="mb-2 text-neutral-200">
+                    Would delete {{ prunePreview.sessions }} sessions, {{ prunePreview.channels }}
+                    room visits, {{ prunePreview.chat }} chat lines and {{ prunePreview.beeps }} beeps.
+                    Members and notes are kept.
+                </p>
+                <div class="flex gap-2">
+                    <button class="btn btn-accent" :disabled="pruning" @click="applyPrune">
+                        Prune now
+                    </button>
+                    <button class="btn" :disabled="pruning" @click="prunePreview = null">Cancel</button>
+                </div>
+            </div>
+            <p v-if="pruneDone" class="mb-4 text-sm text-emerald-400">{{ pruneDone }}</p>
+
+            <div class="mb-4 border-t border-white/5 pt-4">
+                <p class="mb-3 text-sm text-neutral-300">
+                    Appearance images:
+                    <template v-if="imageStats">
+                        <span class="text-white">{{ imageStats.count }}</span> stored ·
+                        <span class="text-white">~{{ formatBytes(imageStats.bytes) }}</span>
+                    </template>
+                    <template v-else>calculating…</template>
+                </p>
+                <div class="flex flex-wrap items-center gap-3 text-sm">
+                    <label class="flex items-center gap-2 text-neutral-400">
+                        Remove images of members not seen in
+                        <select v-model="imagePruneScope" class="input w-auto py-1">
+                            <option :value="3">3 months</option>
+                            <option :value="6">6 months</option>
+                            <option :value="12">a year</option>
+                            <option value="all">(all non-player members)</option>
+                        </select>
+                    </label>
+                    <button class="btn" :disabled="imagePruning" @click="previewImagePrune">
+                        {{ imagePruning ? 'Working…' : 'Preview removal' }}
+                    </button>
+                </div>
+
+                <div
+                    v-if="imagePrunePreview"
+                    class="mt-3 rounded-md border border-amber-500/30 bg-amber-500/5 p-4 text-sm"
+                >
+                    <p class="mb-2 text-neutral-200">
+                        Would remove {{ imagePrunePreview.count }} images, freeing
+                        ~{{ formatBytes(imagePrunePreview.bytes) }}. Your own characters' portraits
+                        are kept, and images come back automatically when you meet people again.
+                    </p>
+                    <div class="flex gap-2">
+                        <button class="btn btn-accent" :disabled="imagePruning" @click="applyImagePrune">
+                            Remove images
+                        </button>
+                        <button class="btn" :disabled="imagePruning" @click="imagePrunePreview = null">
+                            Cancel
+                        </button>
+                    </div>
+                </div>
+                <p v-if="imagePruneDone" class="mt-3 text-sm text-emerald-400">{{ imagePruneDone }}</p>
+            </div>
+
+            <div class="flex items-center gap-3">
+                <button class="btn" :disabled="reencoding" @click="reencodeImages">
+                    {{ reencoding ? 'Converting…' : 'Convert stored images to WebP' }}
+                </button>
+                <span v-if="reencodeStatus" class="text-sm text-neutral-400">{{ reencodeStatus }}</span>
             </div>
         </div>
 

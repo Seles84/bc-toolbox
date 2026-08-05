@@ -66,11 +66,25 @@ export type PageMessage =
 export type PageQuery =
     | { type: 'character-data'; memberNumber: number }
     | { type: 'player-data' }
-    | { type: 'player-wardrobe' };
+    | { type: 'player-wardrobe' }
+    | { type: 'room-roster' }
+    // Act-as-the-player commands — only ever triggered by an explicit user
+    // action in the toolbox UI (typing a message and pressing send).
+    | { type: 'send-whisper'; target: number; message: string }
+    | { type: 'send-beep'; target: number; message: string };
 
 export type PageQueryResult =
     | { success: true; data: unknown }
     | { success: false; error: string };
+
+/** One current room occupant, as returned by the 'room-roster' page query. */
+export interface RosterMember {
+    memberNumber: number;
+    name: string;
+    nickname?: string;
+    labelColor?: string;
+    isPlayer: boolean;
+}
 
 /** One wardrobe save slot, as returned by the 'player-wardrobe' page query. */
 export interface WardrobeSlotInfo {

@@ -3,6 +3,8 @@
  * game event mean" logic lives here.
  */
 import { db } from '@/shared/db';
+import { parseBeepMessage } from '@/shared/beepMessage';
+import { decodeDescription } from '@/shared/description';
 import { CHAT_TYPES, type ChatType, type MemberRecord } from '@/shared/records';
 import type { CapturedProfile, ChatLinePayload, PageMessage } from '@/shared/protocol';
 import { persistTab, type TabState } from './state';
@@ -67,6 +69,11 @@ export async function handlePageMessage(state: TabState, message: PageMessage): 
             state.pendingQueries.get(message.id)?.(message.result);
             return;
     }
+}
+
+/** Store a full profile pulled via an on-demand live page query. */
+export async function storeCapturedProfile(profile: CapturedProfile): Promise<void> {
+    await upsertMember(profileToRecord(profile, Date.now()));
 }
 
 // ---------------------------------------------------------------------------
@@ -150,6 +157,8 @@ async function onGameEvent(
                 return onMemberLeave(state, data as { SourceMemberNumber?: number }, timestamp);
             case 'AccountQueryResult':
                 return onAccountQueryResult(state, data, timestamp);
+            case 'AccountBeep':
+                return onBeep(state, 'in', data, timestamp);
         }
         return;
     }
@@ -157,7 +166,49 @@ async function onGameEvent(
     switch (event) {
         case 'ChatRoomLeave':
             return onRoomLeave(state, timestamp);
+        case 'AccountBeep':
+            return onBeep(state, 'out', data, timestamp);
     }
+}
+
+interface AccountBeepData {
+    MemberNumber?: number;
+    MemberName?: string;
+    ChatRoomName?: string | null;
+    BeepType?: string | null;
+    Message?: unknown;
+}
+
+async function onBeep(
+    state: TabState,
+    direction: 'in' | 'out',
+    data: unknown,
+    timestamp: number,
+): Promise<void> {
+    const beep = data as AccountBeepData;
+    if (!state.memberNumber || typeof beep?.MemberNumber !== 'number') {
+        return;
+    }
+    // BeepType marks game/mod mechanics (leashes, addon sync) — not user beeps.
+    if (beep.BeepType) {
+        return;
+    }
+    let memberName = direction === 'in' ? beep.MemberName : undefined;
+    if (!memberName) {
+        const record = await db.members.get(beep.MemberNumber);
+        memberName = record ? record.nickname || record.name : undefined;
+    }
+    const { text, meta } = parseBeepMessage(beep.Message);
+    await db.beeps.add({
+        viewer: state.memberNumber,
+        member: beep.MemberNumber,
+        memberName,
+        direction,
+        message: text,
+        metadata: meta,
+        roomName: direction === 'in' ? (beep.ChatRoomName ?? undefined) : undefined,
+        created: timestamp,
+    });
 }
 
 async function onRoomSync(state: TabState, data: ChatRoomSyncData, timestamp: number): Promise<void> {
@@ -257,11 +308,16 @@ interface ServerFriendResult {
     }[];
 }
 
-function onAccountQueryResult(state: TabState, data: unknown, timestamp: number): void {
+/** Cooldown so a flaky connection doesn't re-notify about the same person. */
+const NOTIFY_COOLDOWN = 30 * 60_000;
+const lastNotified = new Map<string, number>();
+
+async function onAccountQueryResult(state: TabState, data: unknown, timestamp: number): Promise<void> {
     const result = data as ServerFriendResult;
     if (result?.Query !== 'OnlineFriends' || !Array.isArray(result.Result)) {
         return;
     }
+    const previous = state.friends;
     state.friends = result.Result.filter((f) => typeof f.MemberNumber === 'number').map((f) => ({
         type: f.Type ?? 'Friend',
         memberNumber: f.MemberNumber!,
@@ -273,6 +329,40 @@ function onAccountQueryResult(state: TabState, data: unknown, timestamp: number)
         private: f.Private,
     }));
     state.friendsUpdated = timestamp;
+
+    // Notify about Watch-tagged friends coming online. The first poll after
+    // login sees everyone as "new" — skip it.
+    if (!previous || !state.memberNumber) {
+        return;
+    }
+    const previouslyOnline = new Set(previous.map((f) => f.memberNumber));
+    for (const friend of state.friends) {
+        if (previouslyOnline.has(friend.memberNumber)) {
+            continue;
+        }
+        const note = await db.notes
+            .where('[member+viewer]')
+            .equals([friend.memberNumber, state.memberNumber])
+            .first();
+        if (!note?.tags.some((tag) => tag.toLowerCase() === 'watch')) {
+            continue;
+        }
+        const key = `${state.memberNumber}:${friend.memberNumber}`;
+        if (timestamp - (lastNotified.get(key) ?? 0) < NOTIFY_COOLDOWN) {
+            continue;
+        }
+        lastNotified.set(key, timestamp);
+        chrome.notifications.create(`bct-friend:${state.memberNumber}:${friend.memberNumber}`, {
+            type: 'basic',
+            iconUrl: 'bclub-logo.png',
+            title: `${friend.name} is online`,
+            message: friend.private
+                ? 'In a private room'
+                : friend.chatRoomName
+                  ? `In ${friend.chatRoomName}`
+                  : 'Not in a room yet',
+        });
+    }
 }
 
 async function onChatLine(state: TabState, line: ChatLinePayload, timestamp: number): Promise<void> {
@@ -284,12 +374,23 @@ async function onChatLine(state: TabState, line: ChatLinePayload, timestamp: num
         const sender = await db.members.get(line.sender);
         senderName = sender ? sender.nickname || sender.name : undefined;
     }
+    // An incoming whisper is always addressed to us — the wire payload just
+    // doesn't always say so.
+    let target = line.target;
+    if (
+        line.type === 'Whisper' &&
+        target === undefined &&
+        state.memberNumber &&
+        line.sender !== state.memberNumber
+    ) {
+        target = state.memberNumber;
+    }
     await db.chat.add({
         channelId: state.channelId,
         type: line.type as ChatType,
         sender: line.sender,
         senderName,
-        target: line.target,
+        target,
         message: line.content,
         dictionary: line.dictionary,
         renderedText: line.rendered,
@@ -333,7 +434,7 @@ async function captureRoomCharacter(
         name: bundle.Name,
         nickname: bundle.Nickname,
         title: bundle.Title,
-        description: bundle.Description,
+        description: decodeDescription(bundle.Description),
         creation: bundle.Creation,
         labelColor: bundle.LabelColor,
         ownership: bundle.Ownership,
@@ -352,6 +453,25 @@ async function upsertMember(record: Partial<MemberRecord> & { memberNumber: numb
 
     const existing = await db.members.get(defined.memberNumber);
     if (existing) {
+        // People rename constantly in BC — keep the old identity on record
+        // instead of silently overwriting it.
+        const nameChanged = !!defined.name && !!existing.name && defined.name !== existing.name;
+        const nicknameChanged =
+            defined.nickname !== undefined &&
+            !!existing.nickname &&
+            defined.nickname !== existing.nickname;
+        if (nameChanged || nicknameChanged) {
+            const history = existing.nameHistory ?? [];
+            const last = history[history.length - 1];
+            if (!last || last.name !== existing.name || last.nickname !== existing.nickname) {
+                history.push({
+                    name: existing.name || undefined,
+                    nickname: existing.nickname,
+                    changed: Date.now(),
+                });
+                defined.nameHistory = history.slice(-20);
+            }
+        }
         await db.members.update(defined.memberNumber, defined);
     } else {
         await db.members.put({

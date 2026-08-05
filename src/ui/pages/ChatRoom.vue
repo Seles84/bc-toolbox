@@ -115,7 +115,7 @@ function formatDate(timestamp: number): string {
                     >
                         {{ formatTime(line.created) }}
                     </span>
-                    <ChatLine :line="line" :members="room.members" class="min-w-0 flex-1" />
+                    <ChatLine :line="line" :members="room.members" :viewer="viewer" class="min-w-0 flex-1" />
                 </div>
             </div>
 

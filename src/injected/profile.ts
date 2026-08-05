@@ -3,6 +3,7 @@
  * PNG of its appearance canvas when one has been drawn.
  */
 import type { CapturedProfile } from '@/shared/protocol';
+import { decodeDescription } from '@/shared/description';
 
 export function buildProfile(character: Character, withAppearance: boolean): CapturedProfile | null {
     if (!character.MemberNumber || character.MemberNumber <= 0) {
@@ -25,7 +26,7 @@ export function buildProfile(character: Character, withAppearance: boolean): Cap
         accountName: character.IsPlayer() ? character.AccountName : undefined,
         isPlayer: character.IsPlayer(),
         title: character.Title,
-        description: character.Description,
+        description: decodeDescription(character.Description),
         creation: character.Creation,
         labelColor: character.LabelColor,
         pronouns: character.GetPronouns(),
@@ -53,13 +54,22 @@ export function buildProfile(character: Character, withAppearance: boolean): Cap
         try {
             // cropCanvas returns null for a blank canvas (not drawn yet) —
             // better to send no image than overwrite a good one with a blank.
-            profile.appearanceImage = cropCanvas(character.Canvas)?.toDataURL('image/png');
+            profile.appearanceImage = canvasToDataUrl(cropCanvas(character.Canvas));
         } catch {
             // Canvas may be tainted or not yet drawn; profile is still useful.
         }
     }
 
     return profile;
+}
+
+/** WebP is ~3-4× smaller than PNG for character art; fall back if unsupported. */
+export function canvasToDataUrl(canvas: HTMLCanvasElement | null): string | undefined {
+    if (!canvas) {
+        return undefined;
+    }
+    const webp = canvas.toDataURL('image/webp', 0.85);
+    return webp.startsWith('data:image/webp') ? webp : canvas.toDataURL('image/png');
 }
 
 /** Addon payloads other mods stash on the character object. */
@@ -88,12 +98,25 @@ function sanitize<T>(value: T): T | undefined {
 
 /** Trim the transparent margins off a character canvas; null if it's blank. */
 export function cropCanvas(canvas: HTMLCanvasElement): HTMLCanvasElement | null {
-    const ctx = canvas.getContext('2d', { willReadFrequently: true });
+    const { width, height } = canvas;
+    if (width === 0 || height === 0) {
+        return null;
+    }
+
+    // Copy the game's canvas onto a scratch canvas of our own. The game
+    // created its contexts without willReadFrequently (context attributes
+    // only apply on first getContext), so reading its pixels directly is a
+    // slow GPU readback and triggers a console warning. The copy is the one
+    // readback; the scan and crop below run against CPU-backed memory.
+    const scratch = document.createElement('canvas');
+    scratch.width = width;
+    scratch.height = height;
+    const ctx = scratch.getContext('2d', { willReadFrequently: true });
     if (!ctx) {
         return canvas;
     }
+    ctx.drawImage(canvas, 0, 0);
 
-    const { width, height } = canvas;
     const data = ctx.getImageData(0, 0, width, height).data;
 
     let minX = width;
@@ -127,6 +150,7 @@ export function cropCanvas(canvas: HTMLCanvasElement): HTMLCanvasElement | null 
     if (!croppedCtx) {
         return canvas;
     }
-    croppedCtx.drawImage(canvas, minX, minY, croppedWidth, croppedHeight, 0, 0, croppedWidth, croppedHeight);
+    // Crop from the scratch copy — no further reads touch the game's canvas.
+    croppedCtx.drawImage(scratch, minX, minY, croppedWidth, croppedHeight, 0, 0, croppedWidth, croppedHeight);
     return cropped;
 }
