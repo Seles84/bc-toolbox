@@ -94,8 +94,10 @@ single source of truth — the manifest version and the in-app/mod version const
 generated from it at build time.
 
 Cut a release with `yarn release:patch|minor|major` — this bumps the version, makes the
-version commit + git tag (`vX.Y.Z`), and rebuilds `dist/`. Note Chrome manifests don't allow
-pre-release suffixes (`-beta` etc.), so plain `X.Y.Z` only.
+version commit + git tag (`vX.Y.Z`), rebuilds `dist/`, and snapshots the whole project
+(incl. `.git`, excl. `node_modules`/build output) as a 7z archive into
+`E:\Projects\Personal\BCT_Backups` for out-of-tree rollback. Note Chrome manifests don't
+allow pre-release suffixes (`-beta` etc.), so plain `X.Y.Z` only.
 
 ## Status / roadmap
 

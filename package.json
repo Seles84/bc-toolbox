@@ -10,9 +10,10 @@
         "build:firefox": "node scripts/build.mjs --firefox",
         "type-check": "vue-tsc --build",
         "lint": "eslint . --fix",
-        "release:patch": "yarn version --patch && yarn build",
-        "release:minor": "yarn version --minor && yarn build",
-        "release:major": "yarn version --major && yarn build"
+        "backup:project": "node scripts/backup-project.mjs",
+        "release:patch": "yarn version --patch && yarn build && yarn backup:project",
+        "release:minor": "yarn version --minor && yarn build && yarn backup:project",
+        "release:major": "yarn version --major && yarn build && yarn backup:project"
     },
     "dependencies": {
         "bc-data": "^130.0.0",
