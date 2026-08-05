@@ -126,7 +126,29 @@ const profile = useLiveQuery(
         const siblings = ownerNumber
             ? (await subsOf(ownerNumber)).filter((m) => m.memberNumber !== memberNumber.value)
             : [];
-        return { member: record, seen: seenRecord, submissives: subs, collarSiblings: siblings };
+
+        // Names for the makers of worn crafted items, when we know them.
+        const makerIds = [
+            ...new Set(
+                (record?.wornItems ?? [])
+                    .map((i) => i.craftedBy)
+                    .filter((n): n is number => typeof n === 'number'),
+            ),
+        ];
+        const makerRecords = await db.members.bulkGet(makerIds);
+        const makers = new Map(
+            makerRecords
+                .filter((m): m is MemberRecord => !!m)
+                .map((m) => [m.memberNumber, m.nickname || m.name]),
+        );
+
+        return {
+            member: record,
+            seen: seenRecord,
+            submissives: subs,
+            collarSiblings: siblings,
+            makers,
+        };
     },
     [memberNumber, viewer],
     {
@@ -134,8 +156,11 @@ const profile = useLiveQuery(
         seen: null as MemberSeenRecord | null,
         submissives: [] as MemberRecord[],
         collarSiblings: [] as MemberRecord[],
+        makers: new Map<number, string>(),
     },
 );
+
+const makers = computed(() => profile.value.makers);
 
 const member = computed(() => profile.value.member);
 const seen = computed(() => profile.value.seen);
@@ -610,7 +635,11 @@ const stats = computed(() => {
                                                         params: { viewer, member: item.craftedBy },
                                                     }"
                                                     class="text-accent-soft hover:underline"
-                                                    >#{{ item.craftedBy }}</RouterLink
+                                                    >{{
+                                                        makers.get(item.craftedBy)
+                                                            ? `${makers.get(item.craftedBy)} #${item.craftedBy}`
+                                                            : `#${item.craftedBy}`
+                                                    }}</RouterLink
                                                 >
                                             </template>
                                         </span>
