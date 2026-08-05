@@ -306,7 +306,8 @@ async function saveNote() {
         member: memberNumber.value,
         viewer: viewer.value,
         note: noteText.value,
-        tags: noteTags.value,
+        // Plain copy — IndexedDB can't structured-clone Vue's reactive proxies.
+        tags: [...noteTags.value],
         updated: Date.now(),
     };
     const existing = savedNote.value;
