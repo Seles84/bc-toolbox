@@ -144,9 +144,17 @@ function open(path = '') {
                             Refresh the game tab to update capture
                         </p>
                     </button>
-                    <div class="border-t border-white/5 px-3 py-1.5">
+                    <div class="flex items-center gap-3 border-t border-white/5 px-3 py-1.5">
                         <button
-                            class="text-[11px]"
+                            v-if="tab.channelId"
+                            class="text-[11px] text-accent-soft hover:text-accent"
+                            title="Open the live log of the current room"
+                            @click="open(`#/c/${tab.memberNumber}/chats/${tab.channelId}`)"
+                        >
+                            Room log
+                        </button>
+                        <button
+                            class="ml-auto text-[11px]"
                             :class="
                                 tab.capturePaused
                                     ? 'text-amber-300 hover:text-amber-200'
@@ -154,7 +162,7 @@ function open(path = '') {
                             "
                             @click="toggleTabPause(tab)"
                         >
-                            {{ tab.capturePaused ? 'Capture paused for this tab — resume' : 'Pause capture for this tab' }}
+                            {{ tab.capturePaused ? 'Capture paused — resume' : 'Pause capture' }}
                         </button>
                     </div>
 
