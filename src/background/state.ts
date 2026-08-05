@@ -3,7 +3,13 @@
  * mirrored to chrome.storage.session so a worker restart mid-play doesn't
  * lose the session/channel being recorded.
  */
-import type { OnlineFriendInfo, PageQueryResult, TabStatus, ToPageMessage } from '@/shared/protocol';
+import type {
+    OnlineFriendInfo,
+    PageQuery,
+    PageQueryResult,
+    TabStatus,
+    ToPageMessage,
+} from '@/shared/protocol';
 
 export interface TabState {
     tabId: number;
@@ -94,7 +100,7 @@ export function statusOf(state: TabState): TabStatus {
 /** Send a query into the page and await its response. */
 export function queryPage(
     state: TabState,
-    query: ToPageMessage['query'],
+    query: PageQuery,
     // Generous: the wardrobe query can spend ~10s driving canvas rebuilds
     // while asset images download.
     timeoutMs = 25_000,

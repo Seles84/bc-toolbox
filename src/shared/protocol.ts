@@ -44,6 +44,20 @@ export interface ChatLinePayload {
     rendered?: string;
 }
 
+/** Data the in-game overlay shows about the character being inspected. */
+export interface OverlayMemberInfo {
+    met: boolean;
+    tags: string[];
+    note: string;
+    firstSeen?: number;
+    lastSeen?: number;
+    lastLocation?: string;
+    previousNames?: string[];
+}
+
+/** Requests the PAGE makes against the extension's database. */
+export type PageDataRequest = { type: 'member-overlay'; member: number };
+
 export type PageMessage =
     | { kind: 'mod-loaded'; version: string; build: string; stale?: boolean }
     | { kind: 'session'; state: 'login'; player: CapturedProfile }
@@ -57,7 +71,8 @@ export type PageMessage =
       }
     | { kind: 'chat-line'; line: ChatLinePayload; timestamp: number }
     | { kind: 'appearance'; profile: CapturedProfile; timestamp: number }
-    | { kind: 'query-result'; id: string; result: PageQueryResult };
+    | { kind: 'query-result'; id: string; result: PageQueryResult }
+    | { kind: 'data-request'; id: string; request: PageDataRequest };
 
 // ---------------------------------------------------------------------------
 // Background → page (via relay)
@@ -94,7 +109,9 @@ export interface WardrobeSlotInfo {
     image?: string;
 }
 
-export type ToPageMessage = { kind: 'query'; id: string; query: PageQuery };
+export type ToPageMessage =
+    | { kind: 'query'; id: string; query: PageQuery }
+    | { kind: 'data-response'; id: string; result: unknown };
 
 // ---------------------------------------------------------------------------
 // window.postMessage envelopes

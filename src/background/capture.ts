@@ -152,7 +152,47 @@ export async function handlePageMessage(state: TabState, message: PageMessage): 
         case 'query-result':
             state.pendingQueries.get(message.id)?.(message.result);
             return;
+
+        case 'data-request': {
+            const result = await handleDataRequest(state, message.request).catch(() => null);
+            try {
+                state.port?.postMessage({ kind: 'data-response', id: message.id, result });
+            } catch {
+                // Port died — the page's request just times out.
+            }
+            return;
+        }
     }
+}
+
+async function handleDataRequest(
+    state: TabState,
+    request: import('@/shared/protocol').PageDataRequest,
+): Promise<unknown> {
+    if (request.type === 'member-overlay' && state.memberNumber) {
+        const [record, note, seen] = await Promise.all([
+            db.members.get(request.member),
+            db.notes.where('[member+viewer]').equals([request.member, state.memberNumber]).first(),
+            db.memberSeen
+                .where('[member+viewer]')
+                .equals([request.member, state.memberNumber])
+                .first(),
+        ]);
+        const info: import('@/shared/protocol').OverlayMemberInfo = {
+            met: !!seen || !!record,
+            tags: note?.tags ?? [],
+            note: note?.note ?? '',
+            firstSeen: seen?.firstSeen,
+            lastSeen: seen?.lastSeen,
+            lastLocation: seen?.lastLocation,
+            previousNames: (record?.nameHistory ?? [])
+                .map((h) => h.nickname || h.name)
+                .filter((n): n is string => !!n)
+                .slice(-3),
+        };
+        return info;
+    }
+    return null;
 }
 
 /** Store a full profile pulled via an on-demand live page query. */

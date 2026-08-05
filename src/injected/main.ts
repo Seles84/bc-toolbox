@@ -7,10 +7,12 @@ import bcModSdk from 'bondage-club-mod-sdk';
 import {
     PAGE_SOURCE,
     isRelayEnvelope,
+    type PageDataRequest,
     type PageEnvelope,
     type PageMessage,
 } from '@/shared/protocol';
 import { buildProfile } from './profile';
+import { initOverlay } from './overlay';
 import { runQuery } from './queries';
 
 /**
@@ -258,6 +260,28 @@ function boot() {
         return next(args);
     });
 
+    // -- Data requests (page → background database) --------------------------
+
+    const pendingData = new Map<string, (result: unknown) => void>();
+
+    function requestData(request: PageDataRequest): Promise<unknown> {
+        return new Promise((resolve) => {
+            const id = crypto.randomUUID();
+            const timer = setTimeout(() => {
+                pendingData.delete(id);
+                resolve(null);
+            }, 5_000);
+            pendingData.set(id, (result) => {
+                clearTimeout(timer);
+                pendingData.delete(id);
+                resolve(result);
+            });
+            send({ kind: 'data-request', id, request });
+        });
+    }
+
+    initOverlay(mod, requestData);
+
     // -- Query bridge (background → page) ------------------------------------
 
     window.addEventListener('message', (event: MessageEvent<unknown>) => {
@@ -272,6 +296,8 @@ function boot() {
                     error: error instanceof Error ? error.message : String(error),
                 }))
                 .then((result) => send({ kind: 'query-result', id: message.id, result }));
+        } else if (message.kind === 'data-response') {
+            pendingData.get(message.id)?.(message.result);
         }
     });
 
