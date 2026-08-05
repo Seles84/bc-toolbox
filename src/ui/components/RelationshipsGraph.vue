@@ -38,6 +38,8 @@ watch(
             graph.value = await buildRelationshipGraph(props.focal, props.depth, props.pathTarget);
             emit('pathResult', graph.value.pathFound);
             fit();
+        } catch (error) {
+            console.error('[BCT] relationship graph build failed', error);
         } finally {
             loading.value = false;
         }

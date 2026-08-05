@@ -36,6 +36,15 @@ const pathFound = ref<boolean | undefined>(undefined);
 
 /** Resolve the find-connection input: a member number, or a name lookup. */
 async function findConnection() {
+    try {
+        await resolveConnectionTarget();
+    } catch (error) {
+        console.error('[BCT] find-connection failed', error);
+        pathFound.value = false;
+    }
+}
+
+async function resolveConnectionTarget() {
     pathFound.value = undefined;
     const query = pathQuery.value.trim();
     if (!query) {
