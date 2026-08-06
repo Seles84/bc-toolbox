@@ -1,10 +1,26 @@
 <script setup lang="ts">
 import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import NavDropdown from './components/NavDropdown.vue';
 import { useSessionStore } from './stores/session';
 
 const session = useSessionStore();
 const route = useRoute();
+
+const peopleItems = [
+    { name: 'members', label: 'Members', match: ['member'] },
+    { name: 'friends', label: 'Friends' },
+    { name: 'watchlist', label: 'Watchlist' },
+];
+const messageItems = [
+    { name: 'chats', label: 'Chats', match: ['chatroom'] },
+    { name: 'beeps', label: 'Beeps' },
+    { name: 'bookmarks', label: 'Bookmarks' },
+];
+const outfitItems = [
+    { name: 'wardrobe', label: 'Wardrobe' },
+    { name: 'crafts', label: 'Crafts' },
+];
 
 const capturePaused = ref(false);
 async function loadPrivacy() {
@@ -57,69 +73,15 @@ onUnmounted(() => clearInterval(poll));
                     >
                         Overview
                     </RouterLink>
-                    <RouterLink
-                        :to="{ name: 'members', params: { viewer: session.viewer } }"
-                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
-                        active-class="!text-white bg-white/10"
-                    >
-                        Members
-                    </RouterLink>
-                    <RouterLink
-                        :to="{ name: 'chats', params: { viewer: session.viewer } }"
-                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
-                        active-class="!text-white bg-white/10"
-                    >
-                        Chats
-                    </RouterLink>
-                    <RouterLink
-                        :to="{ name: 'beeps', params: { viewer: session.viewer } }"
-                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
-                        active-class="!text-white bg-white/10"
-                    >
-                        Beeps
-                    </RouterLink>
-                    <RouterLink
-                        :to="{ name: 'friends', params: { viewer: session.viewer } }"
-                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
-                        active-class="!text-white bg-white/10"
-                    >
-                        Friends
-                    </RouterLink>
-                    <RouterLink
-                        :to="{ name: 'watchlist', params: { viewer: session.viewer } }"
-                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
-                        active-class="!text-white bg-white/10"
-                    >
-                        Watchlist
-                    </RouterLink>
-                    <RouterLink
-                        :to="{ name: 'wardrobe', params: { viewer: session.viewer } }"
-                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
-                        active-class="!text-white bg-white/10"
-                    >
-                        Wardrobe
-                    </RouterLink>
-                    <RouterLink
-                        :to="{ name: 'crafts', params: { viewer: session.viewer } }"
-                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
-                        active-class="!text-white bg-white/10"
-                    >
-                        Crafts
-                    </RouterLink>
+                    <NavDropdown label="People" :items="peopleItems" :viewer="session.viewer" />
+                    <NavDropdown label="Messages" :items="messageItems" :viewer="session.viewer" />
+                    <NavDropdown label="Outfits" :items="outfitItems" :viewer="session.viewer" />
                     <RouterLink
                         :to="{ name: 'search', params: { viewer: session.viewer } }"
                         class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
                         active-class="!text-white bg-white/10"
                     >
                         Search
-                    </RouterLink>
-                    <RouterLink
-                        :to="{ name: 'bookmarks', params: { viewer: session.viewer } }"
-                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
-                        active-class="!text-white bg-white/10"
-                        title="Bookmarked messages"
-                    >
-                        ★
                     </RouterLink>
                 </nav>
 
