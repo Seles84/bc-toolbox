@@ -43,6 +43,7 @@ export function buildProfile(character: Character, withAppearance: boolean): Cap
         friends,
         whitelist: character.WhiteList,
         blacklist: character.BlackList,
+        ghostlist: character.IsPlayer() ? [...(Player.GhostList ?? [])] : undefined,
         reputation: sanitize(character.Reputation) as CapturedProfile['reputation'],
         skills: sanitize(character.Skill) as CapturedProfile['skills'],
         crafting: buildCrafting(character),

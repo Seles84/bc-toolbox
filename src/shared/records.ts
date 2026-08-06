@@ -65,6 +65,7 @@ export interface MemberRecord {
     friends?: Record<string, string>;
     whitelist?: number[];
     blacklist?: number[];
+    ghostlist?: number[];
     reputation?: { Type: string; Value: number }[];
     skills?: { Type: string; Level: number; Progress: number; ModifierLevel?: number }[];
     crafting?: unknown[];

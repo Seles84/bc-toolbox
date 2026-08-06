@@ -6,7 +6,7 @@ import type { MemberRecord, MemberSeenRecord } from '@/shared/records';
 import BioText from '../components/BioText.vue';
 import { useLiveQuery } from '../composables/useLiveQuery';
 import RelationshipsGraph from '../components/RelationshipsGraph.vue';
-import { PRESET_TAGS, tagClass } from '../utils/tags';
+import { autoTagsFor, PRESET_TAGS, tagClass } from '../utils/tags';
 import { api } from '../api';
 import { useCheatsStore } from '../stores/cheats';
 import { useSessionStore } from '../stores/session';
@@ -117,6 +117,11 @@ function subsOf(ownerNumber: number): Promise<MemberRecord[]> {
 const profile = useLiveQuery(
     async () => {
         const record = (await db.members.get(memberNumber.value)) ?? null;
+        // The viewing character's own record, for relationship auto tags.
+        const viewerRecord =
+            viewer.value === memberNumber.value
+                ? record
+                : ((await db.members.get(viewer.value)) ?? null);
         const seenRecord =
             (await db.memberSeen
                 .where('[member+viewer]')
@@ -145,6 +150,7 @@ const profile = useLiveQuery(
 
         return {
             member: record,
+            viewerRecord,
             seen: seenRecord,
             submissives: subs,
             collarSiblings: siblings,
@@ -154,6 +160,7 @@ const profile = useLiveQuery(
     [memberNumber, viewer],
     {
         member: null as MemberRecord | null,
+        viewerRecord: null as MemberRecord | null,
         seen: null as MemberSeenRecord | null,
         submissives: [] as MemberRecord[],
         collarSiblings: [] as MemberRecord[],
@@ -164,6 +171,7 @@ const profile = useLiveQuery(
 const makers = computed(() => profile.value.makers);
 
 const member = computed(() => profile.value.member);
+const autoTags = computed(() => autoTagsFor(profile.value.viewerRecord, memberNumber.value));
 const seen = computed(() => profile.value.seen);
 const submissives = computed(() => profile.value.submissives);
 const collarSiblings = computed(() => profile.value.collarSiblings);
@@ -542,7 +550,15 @@ const stats = computed(() => {
                     ><template v-if="index < member.nameHistory.length - 1">, </template>
                 </template>
             </p>
-            <div v-if="noteTags.length" class="mb-2 flex flex-wrap gap-1.5">
+            <div v-if="autoTags.length || noteTags.length" class="mb-2 flex flex-wrap gap-1.5">
+                <span
+                    v-for="auto in autoTags"
+                    :key="auto.tag"
+                    class="rounded px-1.5 py-0.5 text-[11px] font-medium"
+                    :class="auto.class"
+                    :title="auto.title"
+                    >{{ auto.tag }}</span
+                >
                 <span
                     v-for="noteTag in noteTags"
                     :key="noteTag"

@@ -5,7 +5,8 @@ import { db } from '@/shared/db';
 import type { MemberRecord, MemberSeenRecord } from '@/shared/records';
 import { useLiveQuery } from '../composables/useLiveQuery';
 import { useSessionStore } from '../stores/session';
-import { PRESET_TAGS, tagClass } from '../utils/tags';
+import { autoTagsFor, availableAutoTags, PRESET_TAGS, tagClass } from '../utils/tags';
+import type { AutoTag } from '../utils/tags';
 
 const PAGE_SIZE = 48;
 
@@ -33,6 +34,8 @@ interface MembersData {
     seen: Map<number, MemberSeenRecord>;
     tags: Map<number, string[]>;
     allTags: string[];
+    autoTags: Map<number, AutoTag[]>;
+    autoTagNames: string[];
 }
 
 const data = useLiveQuery<MembersData>(
@@ -41,11 +44,20 @@ const data = useLiveQuery<MembersData>(
         const tags = new Map(noteRows.filter((n) => n.tags.length).map((n) => [n.member, n.tags]));
         const allTags = [...new Set(noteRows.flatMap((n) => n.tags))].sort();
 
+        // The viewing character's own record carries the relationship lists
+        // (owner, lovers, subs, friend/white/black/ghost) that drive auto tags.
+        const viewerRecord = await db.members.get(viewer.value);
+        const autoTagNames = availableAutoTags(viewerRecord);
+
         let collection = db.members.orderBy('name');
         if (tagFilter.value) {
             const wanted = tagFilter.value.toLowerCase();
-            collection = collection.filter((m) =>
-                (tags.get(m.memberNumber) ?? []).some((t) => t.toLowerCase() === wanted),
+            collection = collection.filter(
+                (m) =>
+                    (tags.get(m.memberNumber) ?? []).some((t) => t.toLowerCase() === wanted) ||
+                    autoTagsFor(viewerRecord, m.memberNumber).some(
+                        (t) => t.tag.toLowerCase() === wanted,
+                    ),
             );
         }
         const q = query.value;
@@ -68,10 +80,29 @@ const data = useLiveQuery<MembersData>(
             .limit(PAGE_SIZE)
             .toArray();
         const seenRows = await db.memberSeen.where('viewer').equals(viewer.value).toArray();
-        return { rows, total, seen: new Map(seenRows.map((s) => [s.member, s])), tags, allTags };
+        const autoTags = new Map(
+            rows.map((m) => [m.memberNumber, autoTagsFor(viewerRecord, m.memberNumber)]),
+        );
+        return {
+            rows,
+            total,
+            seen: new Map(seenRows.map((s) => [s.member, s])),
+            tags,
+            allTags,
+            autoTags,
+            autoTagNames,
+        };
     },
     [query, page, viewer, tagFilter],
-    { rows: [], total: 0, seen: new Map(), tags: new Map(), allTags: [] },
+    {
+        rows: [],
+        total: 0,
+        seen: new Map(),
+        tags: new Map(),
+        allTags: [],
+        autoTags: new Map(),
+        autoTagNames: [],
+    },
 );
 
 const pages = computed(() => Math.max(1, Math.ceil(data.value.total / PAGE_SIZE)));
@@ -153,9 +184,22 @@ async function bulkApply(remove: boolean) {
             <h1 class="text-2xl font-semibold text-white">Members</h1>
             <span class="text-sm text-neutral-500">{{ data.total }} known</span>
             <div class="ml-auto flex items-center gap-2">
-                <select v-if="data.allTags.length" v-model="tagFilter" class="input w-auto py-1.5">
+                <select
+                    v-if="data.allTags.length || data.autoTagNames.length"
+                    v-model="tagFilter"
+                    class="input w-auto py-1.5"
+                >
                     <option value="">All tags</option>
-                    <option v-for="tag in data.allTags" :key="tag" :value="tag">{{ tag }}</option>
+                    <optgroup v-if="data.autoTagNames.length" label="Auto">
+                        <option v-for="tag in data.autoTagNames" :key="tag" :value="tag">
+                            {{ tag }}
+                        </option>
+                    </optgroup>
+                    <optgroup v-if="data.allTags.length" label="Yours">
+                        <option v-for="tag in data.allTags" :key="tag" :value="tag">
+                            {{ tag }}
+                        </option>
+                    </optgroup>
                 </select>
                 <input v-model="search" class="input max-w-xs" placeholder="Search name or ID…" />
                 <button class="btn" :class="selectMode ? 'btn-accent' : ''" @click="toggleSelectMode">
@@ -228,9 +272,23 @@ async function bulkApply(remove: boolean) {
                         </span>
                     </div>
                     <div class="text-xs text-neutral-500">#{{ member.memberNumber }}</div>
-                    <div v-if="data.tags.get(member.memberNumber)?.length" class="flex flex-wrap gap-1">
+                    <div
+                        v-if="
+                            data.autoTags.get(member.memberNumber)?.length ||
+                            data.tags.get(member.memberNumber)?.length
+                        "
+                        class="flex flex-wrap gap-1"
+                    >
                         <span
-                            v-for="tag in data.tags.get(member.memberNumber)!.slice(0, 3)"
+                            v-for="auto in data.autoTags.get(member.memberNumber)"
+                            :key="auto.tag"
+                            class="rounded px-1 py-px text-[10px] font-medium"
+                            :class="auto.class"
+                            :title="auto.title"
+                            >{{ auto.tag }}</span
+                        >
+                        <span
+                            v-for="tag in (data.tags.get(member.memberNumber) ?? []).slice(0, 3)"
                             :key="tag"
                             class="rounded px-1 py-px text-[10px] font-medium"
                             :class="tagClass(tag)"
