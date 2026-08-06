@@ -35,6 +35,8 @@ export interface WornItem {
     color?: string;
     /** Lock asset name when locked, e.g. "ExclusivePadlock" */
     lock?: string;
+    /** The lock's password/combination when one is set (shown only with cheats on) */
+    lockCode?: string;
     craftName?: string;
     craftedBy?: number;
     restraint: boolean;

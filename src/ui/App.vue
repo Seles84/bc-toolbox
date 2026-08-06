@@ -2,9 +2,11 @@
 import { onMounted, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
 import NavDropdown from './components/NavDropdown.vue';
+import { useCheatsStore } from './stores/cheats';
 import { useSessionStore } from './stores/session';
 
 const session = useSessionStore();
+const cheats = useCheatsStore();
 const route = useRoute();
 
 const peopleItems = [
@@ -82,6 +84,14 @@ onUnmounted(() => clearInterval(poll));
                         active-class="!text-white bg-white/10"
                     >
                         Search
+                    </RouterLink>
+                    <RouterLink
+                        v-if="cheats.enabled"
+                        :to="{ name: 'cheats', params: { viewer: session.viewer } }"
+                        class="rounded-md px-3 py-1.5 text-neutral-400 hover:text-white hover:bg-white/5"
+                        active-class="!text-white bg-white/10"
+                    >
+                        Cheats
                     </RouterLink>
                 </nav>
 

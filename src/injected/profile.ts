@@ -98,6 +98,7 @@ export function buildWornItems(character: Character): WornItem[] | undefined {
                 asset: item.Asset.Name,
                 color: rawColor && rawColor !== 'Default' ? rawColor : undefined,
                 lock: item.Property?.LockedBy || undefined,
+                lockCode: lockCodeOf(item.Property),
                 craftName: item.Craft?.Name || undefined,
                 craftedBy: item.Craft?.MemberNumber,
                 restraint,
@@ -107,6 +108,18 @@ export function buildWornItems(character: Character): WornItem[] | undefined {
     } catch {
         return undefined;
     }
+}
+
+/**
+ * Password/combination of a locked item, when the lock carries one. The game
+ * syncs these to every client and merely hides them in its UI.
+ */
+export function lockCodeOf(property: ItemProperties | undefined): string | undefined {
+    if (!property?.LockedBy) {
+        return undefined;
+    }
+    const code = property.Password ?? property.CombinationNumber;
+    return code !== undefined && code !== '' ? String(code) : undefined;
 }
 
 /**

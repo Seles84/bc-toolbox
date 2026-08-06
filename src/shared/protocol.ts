@@ -92,7 +92,13 @@ export type PageQuery =
     | { type: 'wardrobe-swap'; a: number; b: number }
     | { type: 'wardrobe-get-bundles'; slot: number }
     | { type: 'wardrobe-all-bundles' }
-    | { type: 'wardrobe-set-bundles'; slot: number; bundles: unknown[] };
+    | { type: 'wardrobe-set-bundles'; slot: number; bundles: unknown[] }
+    // Cheats — explicit user actions from the Cheats page, applied to the
+    // player's own character through the game's own change functions.
+    | { type: 'player-stats' }
+    | { type: 'cheat-money'; amount: number }
+    | { type: 'cheat-skill'; skill: string; level: number }
+    | { type: 'cheat-reputation'; rep: string; value: number };
 
 export type PageQueryResult =
     | { success: true; data: unknown }
@@ -105,6 +111,13 @@ export interface RosterMember {
     nickname?: string;
     labelColor?: string;
     isPlayer: boolean;
+}
+
+/** The player's money/skills/reputation, as returned by 'player-stats'. */
+export interface PlayerStats {
+    money: number;
+    skills: { type: string; level: number; progress: number }[];
+    reputation: { type: string; value: number }[];
 }
 
 /** One wardrobe save slot, as returned by the 'player-wardrobe' page query. */

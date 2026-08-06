@@ -3,7 +3,7 @@
  * lookups against game state that only exists in the page.
  */
 import type { PageQuery, PageQueryResult, RosterMember, WardrobeSlotInfo } from '@/shared/protocol';
-import { buildProfile, buildWornItems, canvasToDataUrl, cropCanvas } from './profile';
+import { buildProfile, buildWornItems, canvasToDataUrl, cropCanvas, lockCodeOf } from './profile';
 
 export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
     switch (query.type) {
@@ -206,6 +206,70 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
             return { success: true, data: { imported: valid.length, dropped: query.bundles.length - valid.length } };
         }
 
+        case 'player-stats': {
+            if (!Player?.MemberNumber) {
+                return { success: false, error: 'Not logged in' };
+            }
+            return {
+                success: true,
+                data: {
+                    money: Player.Money ?? 0,
+                    skills: SkillValidSkills.map((type) => ({
+                        type,
+                        level: SkillGetLevelReal(Player, type),
+                        progress: SkillGetProgress(Player, type),
+                    })),
+                    reputation: ReputationValidReputations.map((type) => ({
+                        type,
+                        value: ReputationGet(Player, type),
+                    })),
+                },
+            };
+        }
+
+        case 'cheat-money': {
+            if (!Player?.MemberNumber) {
+                return { success: false, error: 'Not logged in' };
+            }
+            const amount = Math.floor(query.amount);
+            if (!Number.isFinite(amount) || amount < 0 || amount > 99_999_999) {
+                return { success: false, error: 'Amount must be between 0 and 99,999,999' };
+            }
+            // The game's own money change (handles the server push itself).
+            CharacterChangeMoney(Player, amount - (Player.Money ?? 0));
+            ServerPlayerSync();
+            return { success: true, data: { money: Player.Money } };
+        }
+
+        case 'cheat-skill': {
+            if (!Player?.MemberNumber) {
+                return { success: false, error: 'Not logged in' };
+            }
+            const skill = SkillValidSkills.find((s) => s === query.skill);
+            if (!skill) {
+                return { success: false, error: `Unknown skill "${query.skill}"` };
+            }
+            const level = Math.min(10, Math.max(0, Math.floor(query.level)));
+            // SkillChange validates ranges and pushes to the server. Progress
+            // restarts at 0 for the new level.
+            SkillChange(Player, skill, level, 0, true);
+            return { success: true, data: { level: SkillGetLevelReal(Player, skill) } };
+        }
+
+        case 'cheat-reputation': {
+            if (!Player?.MemberNumber) {
+                return { success: false, error: 'Not logged in' };
+            }
+            const rep = ReputationValidReputations.find((r) => r === query.rep);
+            if (!rep) {
+                return { success: false, error: `Unknown reputation "${query.rep}"` };
+            }
+            const value = Math.min(100, Math.max(-100, Math.floor(query.value)));
+            // ReputationChange takes a delta and pushes to the server.
+            ReputationChange(rep, value - ReputationGet(Player, rep), true);
+            return { success: true, data: { value: ReputationGet(Player, rep) } };
+        }
+
         case 'send-whisper': {
             if (!Player?.MemberNumber) {
                 return { success: false, error: 'Not logged in' };
@@ -283,6 +347,7 @@ function bundlesToWornItems(bundles: (ItemBundle | null)[] | null | undefined): 
             asset: asset.Name,
             color: rawColor && rawColor !== 'Default' ? rawColor : undefined,
             lock: bundle.Property?.LockedBy || undefined,
+            lockCode: lockCodeOf(bundle.Property),
             craftName: bundle.Craft?.Name || undefined,
             craftedBy: bundle.Craft?.MemberNumber,
             restraint,

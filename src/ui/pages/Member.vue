@@ -8,6 +8,7 @@ import { useLiveQuery } from '../composables/useLiveQuery';
 import RelationshipsGraph from '../components/RelationshipsGraph.vue';
 import { PRESET_TAGS, tagClass } from '../utils/tags';
 import { api } from '../api';
+import { useCheatsStore } from '../stores/cheats';
 import { useSessionStore } from '../stores/session';
 import { decodeDescription } from '@/shared/description';
 import { downloadText, safeFilename } from '../utils/transcript';
@@ -170,6 +171,7 @@ const collarSiblings = computed(() => profile.value.collarSiblings);
 // -- On-demand profile refresh ------------------------------------------------
 
 const session = useSessionStore();
+const cheats = useCheatsStore();
 const refreshing = ref(false);
 const refreshError = ref<string | null>(null);
 const refreshedAt = ref<number | null>(null);
@@ -624,6 +626,12 @@ const stats = computed(() => {
                                             v-if="item.lock"
                                             class="rounded bg-amber-500/15 px-1.5 py-0.5 text-[10px] font-medium text-amber-300"
                                             >🔒 {{ lockLabel(item.lock) }}</span
+                                        >
+                                        <span
+                                            v-if="cheats.enabled && cheats.showLockCodes && item.lockCode"
+                                            class="rounded bg-rose-500/15 px-1.5 py-0.5 font-mono text-[10px] font-medium text-rose-300"
+                                            title="Lock password/combination"
+                                            >{{ item.lockCode }}</span
                                         >
                                         <span v-if="item.craftName" class="text-xs text-neutral-500">
                                             "{{ item.craftName }}"

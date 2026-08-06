@@ -2,6 +2,9 @@
 import { computed, onMounted, ref, watch } from 'vue';
 import { db } from '@/shared/db';
 import { api } from '../api';
+import { useCheatsStore } from '../stores/cheats';
+
+const cheats = useCheatsStore();
 
 interface BackupSettings {
     enabled: boolean;
@@ -507,6 +510,18 @@ async function applyImport() {
                     >
                 </label>
             </div>
+        </div>
+
+        <div class="card mb-4 p-5">
+            <h2 class="mb-1 font-medium text-white">Cheats</h2>
+            <p class="mb-3 text-sm text-neutral-500">
+                Money, skills, reputation and other shortcuts for your own character.
+            </p>
+            <label class="flex cursor-pointer items-center gap-2 text-sm text-neutral-300">
+                <input v-model="cheats.enabled" type="checkbox" class="accent-accent" />
+                Enable cheats
+                <span class="text-xs text-neutral-600">(adds the Cheats page to the navigation)</span>
+            </label>
         </div>
 
         <div class="card mb-4 p-5">

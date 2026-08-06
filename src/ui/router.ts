@@ -20,6 +20,7 @@ export const router = createRouter({
                 { path: 'friends', name: 'friends', component: () => import('./pages/Friends.vue') },
                 { path: 'beeps', name: 'beeps', component: () => import('./pages/Beeps.vue') },
                 { path: 'search', name: 'search', component: () => import('./pages/Search.vue') },
+                { path: 'cheats', name: 'cheats', component: () => import('./pages/Cheats.vue') },
                 { path: 'crafts', name: 'crafts', component: () => import('./pages/Crafts.vue') },
                 {
                     path: 'watchlist',
