@@ -11,17 +11,29 @@ import { api } from '../ui/api';
 const version = __BCT_VERSION__;
 const tabs = ref<TabStatus[]>([]);
 const globalPaused = ref(false);
+const busyMode = ref(false);
 
 async function loadPrivacy() {
     const stored = await chrome.storage.local.get('privacy');
-    globalPaused.value = !!(stored.privacy as { capturePaused?: boolean } | undefined)?.capturePaused;
+    const privacy = (stored.privacy as { capturePaused?: boolean; busyMode?: boolean }) ?? {};
+    globalPaused.value = !!privacy.capturePaused;
+    busyMode.value = !!privacy.busyMode;
+}
+
+async function setPrivacy(patch: Record<string, unknown>) {
+    const stored = await chrome.storage.local.get('privacy');
+    const privacy = (stored.privacy as Record<string, unknown>) ?? {};
+    await chrome.storage.local.set({ privacy: { ...privacy, ...patch } });
 }
 
 async function toggleGlobalPause() {
-    const stored = await chrome.storage.local.get('privacy');
-    const privacy = (stored.privacy as Record<string, unknown>) ?? {};
     globalPaused.value = !globalPaused.value;
-    await chrome.storage.local.set({ privacy: { ...privacy, capturePaused: globalPaused.value } });
+    await setPrivacy({ capturePaused: globalPaused.value });
+}
+
+async function toggleBusyMode() {
+    busyMode.value = !busyMode.value;
+    await setPrivacy({ busyMode: busyMode.value });
 }
 
 async function toggleTabPause(tab: TabStatus) {
@@ -97,6 +109,19 @@ function open(path = '') {
             >
                 <span class="h-2 w-2 rounded-full" :class="globalPaused ? 'bg-amber-400' : 'bg-emerald-400'" />
                 {{ globalPaused ? 'Capture paused — click to resume' : 'Capture active — click to pause' }}
+            </button>
+            <button
+                class="mb-2 flex w-full items-center gap-2 rounded-md px-3 py-2 text-sm"
+                :class="
+                    busyMode
+                        ? 'bg-sky-500/15 text-sky-300 hover:bg-sky-500/25'
+                        : 'bg-surface-2 text-neutral-300 hover:bg-surface-3'
+                "
+                title="Busy mode silences keyword and friend notifications; everything is still recorded"
+                @click="toggleBusyMode"
+            >
+                <span class="h-2 w-2 rounded-full" :class="busyMode ? 'bg-sky-400' : 'bg-emerald-400'" />
+                {{ busyMode ? 'Busy — notifications muted' : 'Notifications on — click to mute' }}
             </button>
             <div v-if="liveTabs.length === 0" class="card p-4 text-center text-sm text-neutral-400">
                 No characters online.

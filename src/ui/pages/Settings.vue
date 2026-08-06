@@ -60,7 +60,7 @@ watch(
 
 // -- Privacy -----------------------------------------------------------------
 
-const privacy = ref({ capturePaused: false, skipPrivateRooms: false });
+const privacy = ref({ capturePaused: false, skipPrivateRooms: false, busyMode: false });
 let privacyLoaded = false;
 
 watch(
@@ -497,6 +497,13 @@ async function applyImport() {
                     Never record private rooms
                     <span class="text-xs text-neutral-600">
                         (no chat, members or sightings from rooms marked private)</span
+                    >
+                </label>
+                <label class="flex cursor-pointer items-center gap-2 text-neutral-300">
+                    <input v-model="privacy.busyMode" type="checkbox" class="accent-accent" />
+                    Busy mode — mute notifications
+                    <span class="text-xs text-neutral-600">
+                        (no keyword or friend alerts; everything is still recorded)</span
                     >
                 </label>
             </div>

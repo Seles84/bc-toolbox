@@ -39,9 +39,11 @@ const STORED_MESSAGE_TYPES = new Set<string>(CHAT_TYPES);
 interface PrivacySettings {
     capturePaused: boolean;
     skipPrivateRooms: boolean;
+    /** Busy mode: capture runs as normal but no desktop notifications fire. */
+    busyMode: boolean;
 }
 
-let privacy: PrivacySettings = { capturePaused: false, skipPrivateRooms: false };
+let privacy: PrivacySettings = { capturePaused: false, skipPrivateRooms: false, busyMode: false };
 void chrome.storage.local.get('privacy').then((stored) => {
     privacy = { ...privacy, ...((stored.privacy as Partial<PrivacySettings>) ?? {}) };
 });
@@ -50,6 +52,7 @@ chrome.storage.onChanged.addListener((changes, area) => {
         privacy = {
             capturePaused: false,
             skipPrivateRooms: false,
+            busyMode: false,
             ...((changes.privacy.newValue as Partial<PrivacySettings>) ?? {}),
         };
     }
@@ -81,7 +84,7 @@ const KEYWORD_COOLDOWN = 60_000;
 const keywordNotifiedAt = new Map<string, number>();
 
 async function maybeKeywordAlert(state: TabState, line: ChatLinePayload, senderName?: string) {
-    if (alertKeywords.length === 0 || line.sender === state.memberNumber) {
+    if (privacy.busyMode || alertKeywords.length === 0 || line.sender === state.memberNumber) {
         return;
     }
     const haystack = `${line.rendered ?? ''} ${line.content}`.toLowerCase();
@@ -474,7 +477,7 @@ async function onAccountQueryResult(state: TabState, data: unknown, timestamp: n
 
     // Notify about Watch-tagged friends coming online. The first poll after
     // login sees everyone as "new" — skip it.
-    if (!previous || !state.memberNumber) {
+    if (privacy.busyMode || !previous || !state.memberNumber) {
         return;
     }
     const previouslyOnline = new Set(previous.map((f) => f.memberNumber));
