@@ -73,7 +73,11 @@ function formatDate(timestamp: number): string {
         <!-- Character / live status -->
         <div class="card p-5">
             <div class="flex items-start gap-4">
-                <div class="flex h-40 w-24 shrink-0 items-center justify-center rounded bg-surface-2/60">
+                <RouterLink
+                    :to="{ name: 'member', params: { viewer, member: viewer } }"
+                    class="flex h-40 w-24 shrink-0 items-center justify-center rounded bg-surface-2/60 ring-accent-soft/40 hover:ring-1"
+                    title="Open your profile"
+                >
                     <img
                         v-if="data.record?.appearanceImage"
                         :src="data.record.appearanceImage"
@@ -81,15 +85,21 @@ function formatDate(timestamp: number): string {
                         class="h-full object-contain"
                     />
                     <span v-else class="text-2xl text-neutral-600">?</span>
-                </div>
+                </RouterLink>
                 <div class="min-w-0">
-                    <h1
-                        class="truncate text-xl font-semibold"
-                        :style="{ color: data.record?.labelColor || '#ffffff' }"
+                    <RouterLink
+                        :to="{ name: 'member', params: { viewer, member: viewer } }"
+                        class="group block"
+                        title="Open your profile"
                     >
-                        {{ data.record ? data.record.nickname || data.record.name : `#${viewer}` }}
-                    </h1>
-                    <p class="mb-3 text-xs text-neutral-500">#{{ viewer }}</p>
+                        <h1
+                            class="truncate text-xl font-semibold group-hover:underline"
+                            :style="{ color: data.record?.labelColor || '#ffffff' }"
+                        >
+                            {{ data.record ? data.record.nickname || data.record.name : `#${viewer}` }}
+                        </h1>
+                        <p class="mb-3 text-xs text-neutral-500">#{{ viewer }}</p>
+                    </RouterLink>
 
                     <div class="flex items-center gap-2 text-sm">
                         <span
