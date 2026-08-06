@@ -112,7 +112,7 @@ watch(pages, (value) => {
 });
 
 function formatDate(timestamp?: number): string {
-    return timestamp ? new Date(timestamp).toLocaleDateString() : '—';
+    return timestamp ? new Date(timestamp).toLocaleString() : '—';
 }
 
 // -- Bulk tagging ------------------------------------------------------------

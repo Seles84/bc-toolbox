@@ -469,10 +469,6 @@ function formatDate(timestamp?: number): string {
     return timestamp ? new Date(timestamp).toLocaleString() : '—';
 }
 
-function formatDay(timestamp?: number): string {
-    return timestamp ? new Date(timestamp).toLocaleDateString() : '—';
-}
-
 const stats = computed(() => {
     const joined = member.value?.creation;
     const joinedDays = daysSince(joined);
@@ -491,7 +487,7 @@ const stats = computed(() => {
         { label: 'Item permissions', value: permissionLabel(member.value?.itemPermission) },
         {
             label: 'Joined',
-            value: joined ? `${formatDay(joined)}${joinedDays !== null ? ` (${joinedDays} days ago)` : ''}` : '—',
+            value: joined ? `${formatDate(joined)}${joinedDays !== null ? ` (${joinedDays} days ago)` : ''}` : '—',
         },
         { label: 'First seen', value: formatDate(seen.value?.firstSeen) },
         { label: 'Last seen', value: formatDate(seen.value?.lastSeen) },
@@ -748,7 +744,7 @@ const stats = computed(() => {
                                     <span class="text-neutral-500">
                                         — {{ collarStateLabel(ownership.Stage) }}
                                         <template v-if="ownership.Start">
-                                            since {{ formatDay(ownership.Start) }} ({{
+                                            since {{ formatDate(ownership.Start) }} ({{
                                                 durationSince(ownership.Start)
                                             }})</template
                                         >
@@ -774,7 +770,7 @@ const stats = computed(() => {
                                     <span class="text-neutral-500">
                                         — {{ collarStateLabel(sibling.ownership?.Stage) }}
                                         <template v-if="sibling.ownership?.Start">
-                                            since {{ formatDay(sibling.ownership.Start) }}</template
+                                            since {{ formatDate(sibling.ownership.Start) }}</template
                                         >
                                     </span>
                                 </li>
@@ -795,7 +791,7 @@ const stats = computed(() => {
                                     <span class="text-neutral-500">
                                         — {{ collarStateLabel(sub.ownership?.Stage) }}
                                         <template v-if="sub.ownership?.Start">
-                                            since {{ formatDay(sub.ownership.Start) }}</template
+                                            since {{ formatDate(sub.ownership.Start) }}</template
                                         >
                                     </span>
                                 </li>
@@ -821,7 +817,7 @@ const stats = computed(() => {
                                     <span class="text-neutral-500">
                                         — {{ loverStateLabel(lover.Stage) }}
                                         <template v-if="lover.Start">
-                                            since {{ formatDay(lover.Start) }} ({{
+                                            since {{ formatDate(lover.Start) }} ({{
                                                 durationSince(lover.Start)
                                             }})</template
                                         >
@@ -842,7 +838,7 @@ const stats = computed(() => {
                             <ul class="space-y-1 text-sm">
                                 <li v-for="(entry, index) in relationshipHistory" :key="index">
                                     <span class="text-neutral-500"
-                                        >Until {{ formatDay(entry.changed) }}:</span
+                                        >Until {{ formatDate(entry.changed) }}:</span
                                     >
                                     <span class="text-neutral-300"> {{ entry.text }}</span>
                                 </li>

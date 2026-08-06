@@ -236,12 +236,12 @@ function buildPanel(info: OverlayMemberInfo, restraints?: string): HTMLDivElemen
     }
 
     if (info.lastSeen) {
-        const seen = `Last seen ${new Date(info.lastSeen).toLocaleDateString()}${info.lastLocation ? ` in ${info.lastLocation}` : ''}`;
+        const seen = `Last seen ${new Date(info.lastSeen).toLocaleString()}${info.lastLocation ? ` in ${info.lastLocation}` : ''}`;
         panel.appendChild(line(seen, { muted: 0.75 }));
     }
     if (info.firstSeen) {
         panel.appendChild(
-            line(`First met ${new Date(info.firstSeen).toLocaleDateString()}`, { muted: 0.6 }),
+            line(`First met ${new Date(info.firstSeen).toLocaleString()}`, { muted: 0.6 }),
         );
     }
     if (info.previousNames?.length) {
