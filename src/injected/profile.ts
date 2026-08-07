@@ -103,6 +103,14 @@ export function buildWornItems(character: Character): WornItem[] | undefined {
                 craftName: item.Craft?.Name || undefined,
                 craftedBy: item.Craft?.MemberNumber,
                 restraint,
+                raw: sanitize({
+                    Group: group.Name,
+                    Name: item.Asset.Name,
+                    Color: item.Color,
+                    Difficulty: item.Difficulty,
+                    Property: item.Property,
+                    Craft: item.Craft,
+                }),
             });
         }
         return items.length > 0 ? items : undefined;

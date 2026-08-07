@@ -39,6 +39,8 @@ const tab = ref<
     | 'notes'
 >('stats');
 const graphDepth = ref(3);
+/** Wearing tab: slot group whose raw item bundle is expanded */
+const rawShown = ref<string | null>(null);
 const pathQuery = ref('');
 const pathTarget = ref<number | undefined>(undefined);
 const pathFound = ref<boolean | undefined>(undefined);
@@ -663,6 +665,20 @@ const stats = computed(() => {
                                                 >
                                             </template>
                                         </span>
+                                        <button
+                                            v-if="item.raw"
+                                            class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-neutral-400 hover:bg-surface-3 hover:text-white"
+                                            :class="rawShown === item.group ? '!text-white bg-surface-3' : ''"
+                                            title="Raw item data as the game sees it"
+                                            @click="rawShown = rawShown === item.group ? null : item.group"
+                                        >
+                                            raw
+                                        </button>
+                                        <pre
+                                            v-if="rawShown === item.group"
+                                            class="mt-1 w-full overflow-x-auto rounded bg-surface-2/60 p-2 font-mono text-[11px] leading-relaxed text-neutral-300"
+                                            >{{ JSON.stringify(item.raw, null, 2) }}</pre
+                                        >
                                     </li>
                                 </ul>
                             </section>

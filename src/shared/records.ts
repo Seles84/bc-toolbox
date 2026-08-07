@@ -40,6 +40,8 @@ export interface WornItem {
     craftName?: string;
     craftedBy?: number;
     restraint: boolean;
+    /** Full server-shaped item bundle (Color/Difficulty/Property/Craft) */
+    raw?: unknown;
 }
 
 /** Captured character profile — the `members` table. Keyed by member number. */
