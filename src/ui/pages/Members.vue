@@ -19,6 +19,12 @@ const query = ref('');
 const page = ref(1);
 const tagFilter = ref('');
 
+type SortKey = 'name-asc' | 'name-desc' | 'nick-asc' | 'nick-desc' | 'id-asc' | 'id-desc';
+const sortBy = ref<SortKey>('name-asc');
+watch(sortBy, () => {
+    page.value = 1;
+});
+
 let debounce: ReturnType<typeof setTimeout> | undefined;
 watch(search, () => {
     clearTimeout(debounce);
@@ -49,21 +55,22 @@ const data = useLiveQuery<MembersData>(
         const viewerRecord = await db.members.get(viewer.value);
         const autoTagNames = availableAutoTags(viewerRecord);
 
-        let collection = db.members.orderBy('name');
-        if (tagFilter.value) {
-            const wanted = tagFilter.value.toLowerCase();
-            collection = collection.filter(
-                (m) =>
+        // Slim filter/sort pass over all members (records are heavy with
+        // images — only the current page is fully loaded, via bulkGet).
+        const wanted = tagFilter.value.toLowerCase();
+        const q = query.value;
+        const slim: { memberNumber: number; name: string; nickname?: string }[] = [];
+        await db.members.each((m) => {
+            if (wanted) {
+                const has =
                     (tags.get(m.memberNumber) ?? []).some((t) => t.toLowerCase() === wanted) ||
                     autoTagsFor(viewerRecord, m.memberNumber).some(
                         (t) => t.tag.toLowerCase() === wanted,
-                    ),
-            );
-        }
-        const q = query.value;
-        if (q) {
-            collection = collection.filter(
-                (m) =>
+                    );
+                if (!has) return;
+            }
+            if (q) {
+                const match =
                     m.name.toLowerCase().includes(q) ||
                     (m.nickname ?? '').toLowerCase().includes(q) ||
                     String(m.memberNumber).includes(q) ||
@@ -71,14 +78,32 @@ const data = useLiveQuery<MembersData>(
                         (h) =>
                             (h.name ?? '').toLowerCase().includes(q) ||
                             (h.nickname ?? '').toLowerCase().includes(q),
-                    ),
-            );
-        }
-        const total = await collection.clone().count();
-        const rows = await collection
-            .offset((page.value - 1) * PAGE_SIZE)
-            .limit(PAGE_SIZE)
-            .toArray();
+                    );
+                if (!match) return;
+            }
+            slim.push({ memberNumber: m.memberNumber, name: m.name, nickname: m.nickname });
+        });
+
+        const [field, dir] = sortBy.value.split('-') as ['name' | 'nick' | 'id', 'asc' | 'desc'];
+        slim.sort((a, b) => {
+            let cmp: number;
+            if (field === 'id') {
+                cmp = a.memberNumber - b.memberNumber;
+            } else {
+                const ka = field === 'nick' ? a.nickname || a.name : a.name;
+                const kb = field === 'nick' ? b.nickname || b.name : b.name;
+                cmp =
+                    ka.localeCompare(kb, undefined, { sensitivity: 'base' }) ||
+                    a.memberNumber - b.memberNumber;
+            }
+            return dir === 'desc' ? -cmp : cmp;
+        });
+
+        const total = slim.length;
+        const pageIds = slim
+            .slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE)
+            .map((s) => s.memberNumber);
+        const rows = (await db.members.bulkGet(pageIds)).filter((m): m is MemberRecord => !!m);
         const seenRows = await db.memberSeen.where('viewer').equals(viewer.value).toArray();
         const autoTags = new Map(
             rows.map((m) => [m.memberNumber, autoTagsFor(viewerRecord, m.memberNumber)]),
@@ -93,7 +118,7 @@ const data = useLiveQuery<MembersData>(
             autoTagNames,
         };
     },
-    [query, page, viewer, tagFilter],
+    [query, page, viewer, tagFilter, sortBy],
     {
         rows: [],
         total: 0,
@@ -200,6 +225,14 @@ async function bulkApply(remove: boolean) {
                             {{ tag }}
                         </option>
                     </optgroup>
+                </select>
+                <select v-model="sortBy" class="input w-auto py-1.5" title="Order">
+                    <option value="name-asc">Name A→Z</option>
+                    <option value="name-desc">Name Z→A</option>
+                    <option value="nick-asc">Nickname A→Z</option>
+                    <option value="nick-desc">Nickname Z→A</option>
+                    <option value="id-asc">ID low→high</option>
+                    <option value="id-desc">ID high→low</option>
                 </select>
                 <input v-model="search" class="input max-w-xs" placeholder="Search name or ID…" />
                 <button class="btn" :class="selectMode ? 'btn-accent' : ''" @click="toggleSelectMode">
