@@ -265,6 +265,14 @@ async function copyMermaid() {
     }
 }
 
+const LEGEND = [
+    { label: 'On trial', color: '#9ca3af', dashed: false },
+    { label: 'Collared', color: '#f5f5f5', dashed: false },
+    { label: 'Dating', color: '#f87171', dashed: true },
+    { label: 'Engaged', color: '#c084fc', dashed: true },
+    { label: 'Married', color: '#22d3ee', dashed: true },
+];
+
 function truncate(label: string): string {
     const max = style.nodeStyle === 'left' ? 15 : style.nodeStyle === 'top' ? 14 : 20;
     return label.length > max ? label.slice(0, max - 1) + '…' : label;
@@ -441,6 +449,22 @@ function openMember(id: number) {
                 Building graph…
             </div>
 
+            <div
+                v-if="fullscreen"
+                class="absolute bottom-2 left-2 flex flex-wrap items-center gap-x-4 gap-y-1 rounded-lg border border-white/10 bg-surface/85 px-3 py-1.5 text-xs text-neutral-500"
+                @pointerdown.stop
+            >
+                <span v-for="item in LEGEND" :key="item.label">
+                    <span
+                        class="mr-1 inline-block h-0.5 w-5 align-middle"
+                        :class="item.dashed ? 'border-t-2 border-dashed' : ''"
+                        :style="item.dashed ? { borderColor: item.color } : { background: item.color }"
+                    ></span
+                    >{{ item.label }}</span
+                >
+                <span v-if="graph?.truncated" class="text-amber-400">Graph truncated</span>
+            </div>
+
             <div class="absolute top-2 right-2 flex gap-1.5">
                 <button
                     class="btn px-2 py-1 text-xs"
@@ -549,11 +573,14 @@ paste into mermaid.live
 </div>
 
         <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-500">
-            <span><span class="mr-1 inline-block h-0.5 w-5 align-middle" style="background: #9ca3af"></span>On trial</span>
-            <span><span class="mr-1 inline-block h-0.5 w-5 align-middle" style="background: #f5f5f5"></span>Collared</span>
-            <span><span class="mr-1 inline-block h-0.5 w-5 border-t-2 border-dashed align-middle" style="border-color: #f87171"></span>Dating</span>
-            <span><span class="mr-1 inline-block h-0.5 w-5 border-t-2 border-dashed align-middle" style="border-color: #c084fc"></span>Engaged</span>
-            <span><span class="mr-1 inline-block h-0.5 w-5 border-t-2 border-dashed align-middle" style="border-color: #22d3ee"></span>Married</span>
+            <span v-for="item in LEGEND" :key="item.label">
+                <span
+                    class="mr-1 inline-block h-0.5 w-5 align-middle"
+                    :class="item.dashed ? 'border-t-2 border-dashed' : ''"
+                    :style="item.dashed ? { borderColor: item.color } : { background: item.color }"
+                ></span
+                >{{ item.label }}</span
+            >
             <span v-if="graph?.truncated" class="text-amber-400">Graph truncated (too many nodes)</span>
         </div>
     </div>
