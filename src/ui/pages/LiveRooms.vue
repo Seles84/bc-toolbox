@@ -72,10 +72,31 @@ const filtered = computed(() => {
                 room.description.toLowerCase().includes(q)
             );
         })
-        .sort((a, b) => b.memberCount - a.memberCount);
+        // Rooms with friends in them first, then the busiest.
+        .sort(
+            (a, b) =>
+                Number(b.friends.length > 0) - Number(a.friends.length > 0) ||
+                b.memberCount - a.memberCount,
+        );
 });
 
 const population = computed(() => filtered.value.reduce((sum, r) => sum + r.memberCount, 0));
+
+// -- Pagination --------------------------------------------------------------
+
+const PAGE_SIZE = 50;
+const page = ref(1);
+const pageCount = computed(() => Math.max(1, Math.ceil(filtered.value.length / PAGE_SIZE)));
+const paged = computed(() =>
+    filtered.value.slice((page.value - 1) * PAGE_SIZE, page.value * PAGE_SIZE),
+);
+
+watch([filter, space, hideFull, rooms], () => {
+    page.value = 1;
+});
+watch(pageCount, (count) => {
+    if (page.value > count) page.value = count;
+});
 
 function formatDate(timestamp: number): string {
     return new Date(timestamp).toLocaleString();
@@ -126,7 +147,7 @@ function formatDate(timestamp: number): string {
             </div>
 
             <div class="card divide-y divide-white/5">
-                <div v-for="room in filtered" :key="`${room.space}:${room.name}`" class="px-4 py-3">
+                <div v-for="room in paged" :key="`${room.space}:${room.name}`" class="px-4 py-3">
                     <div class="flex items-baseline gap-2">
                         <span class="truncate font-medium text-white">{{ room.name }}</span>
                         <span
@@ -177,6 +198,19 @@ function formatDate(timestamp: number): string {
                         </template>
                     </p>
                 </div>
+            </div>
+
+            <div
+                v-if="pageCount > 1"
+                class="mt-4 flex items-center justify-center gap-3 text-sm"
+            >
+                <button class="btn px-3 py-1 text-xs" :disabled="page <= 1" @click="page--">
+                    Previous
+                </button>
+                <span class="text-neutral-400">Page {{ page }} of {{ pageCount }}</span>
+                <button class="btn px-3 py-1 text-xs" :disabled="page >= pageCount" @click="page++">
+                    Next
+                </button>
             </div>
         </template>
 
