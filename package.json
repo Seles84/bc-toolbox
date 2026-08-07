@@ -11,9 +11,10 @@
         "type-check": "vue-tsc --build",
         "lint": "eslint . --fix",
         "backup:project": "node scripts/backup-project.mjs",
-        "release:patch": "yarn version --patch && yarn build && yarn backup:project",
-        "release:minor": "yarn version --minor && yarn build && yarn backup:project",
-        "release:major": "yarn version --major && yarn build && yarn backup:project"
+        "package:zip": "node scripts/package-zip.mjs",
+        "release:patch": "yarn version --patch && yarn build && yarn backup:project && yarn package:zip",
+        "release:minor": "yarn version --minor && yarn build && yarn backup:project && yarn package:zip",
+        "release:major": "yarn version --major && yarn build && yarn backup:project && yarn package:zip"
     },
     "dependencies": {
         "bc-data": "^130.0.0",

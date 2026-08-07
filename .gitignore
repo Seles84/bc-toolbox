@@ -1,6 +1,7 @@
 node_modules/
 dist/
 dist-firefox/
+release/
 *.log
 .DS_Store
 .idea/
