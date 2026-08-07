@@ -16,6 +16,11 @@ export const router = createRouter({
                     component: () => import('./pages/Member.vue'),
                 },
                 { path: 'chats', name: 'chats', component: () => import('./pages/Chats.vue') },
+                {
+                    path: 'rooms',
+                    name: 'liverooms',
+                    component: () => import('./pages/LiveRooms.vue'),
+                },
                 { path: 'wardrobe', name: 'wardrobe', component: () => import('./pages/Wardrobe.vue') },
                 { path: 'friends', name: 'friends', component: () => import('./pages/Friends.vue') },
                 { path: 'beeps', name: 'beeps', component: () => import('./pages/Beeps.vue') },

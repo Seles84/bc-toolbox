@@ -16,6 +16,7 @@ const peopleItems = [
 ];
 const messageItems = [
     { name: 'chats', label: 'Chats', match: ['chatroom'] },
+    { name: 'liverooms', label: 'Live rooms' },
     { name: 'beeps', label: 'Beeps' },
     { name: 'bookmarks', label: 'Bookmarks' },
 ];

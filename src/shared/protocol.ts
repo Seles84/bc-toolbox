@@ -93,6 +93,7 @@ export type PageQuery =
     | { type: 'wardrobe-get-bundles'; slot: number }
     | { type: 'wardrobe-all-bundles' }
     | { type: 'wardrobe-set-bundles'; slot: number; bundles: unknown[] }
+    | { type: 'search-rooms' }
     // Cheats — explicit user actions from the Cheats page, applied to the
     // player's own character through the game's own change functions.
     | { type: 'player-stats' }
@@ -111,6 +112,28 @@ export interface RosterMember {
     nickname?: string;
     labelColor?: string;
     isPlayer: boolean;
+}
+
+/** One live room on the server, as returned by the 'search-rooms' page query. */
+export interface LiveRoomInfo {
+    name: string;
+    description: string;
+    language: string;
+    /** '' = female-only, 'X' = mixed, 'M' = male-only, 'Asylum' = asylum */
+    space: string;
+    creator: string;
+    creatorMemberNumber: number;
+    /** Room creation timestamp */
+    creation: number;
+    memberCount: number;
+    memberLimit: number;
+    /** Chatroom game being played, when any */
+    game?: string;
+    mapType?: string;
+    /** Whether the player could join right now (visibility/access/space) */
+    canJoin?: boolean;
+    /** Friends of the player currently in the room */
+    friends: { memberNumber: number; name: string }[];
 }
 
 /** The player's money/skills/reputation, as returned by 'player-stats'. */

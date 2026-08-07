@@ -2,7 +2,13 @@
  * Handles live queries from the UI (routed background → relay → here):
  * lookups against game state that only exists in the page.
  */
-import type { PageQuery, PageQueryResult, RosterMember, WardrobeSlotInfo } from '@/shared/protocol';
+import type {
+    LiveRoomInfo,
+    PageQuery,
+    PageQueryResult,
+    RosterMember,
+    WardrobeSlotInfo,
+} from '@/shared/protocol';
 import { buildProfile, buildWornItems, canvasToDataUrl, cropCanvas, lockCodeOf } from './profile';
 
 export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
@@ -292,6 +298,39 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
             return { success: true, data: null };
         }
 
+        case 'search-rooms': {
+            if (!Player?.MemberNumber) {
+                return { success: false, error: 'Not logged in' };
+            }
+            try {
+                const data = await searchAllRooms();
+                const rooms: LiveRoomInfo[] = data.map((room) => ({
+                    name: room.Name,
+                    description: room.Description,
+                    language: room.Language,
+                    space: room.Space,
+                    creator: room.Creator,
+                    creatorMemberNumber: room.CreatorMemberNumber,
+                    creation: room.Creation,
+                    memberCount: room.MemberCount,
+                    memberLimit: room.MemberLimit,
+                    game: room.Game || undefined,
+                    mapType: room.MapType || undefined,
+                    canJoin: room.CanJoin,
+                    friends: (room.Friends ?? []).map((f) => ({
+                        memberNumber: f.MemberNumber,
+                        name: f.MemberName,
+                    })),
+                }));
+                return { success: true, data: { rooms } };
+            } catch (error) {
+                return {
+                    success: false,
+                    error: error instanceof Error ? error.message : String(error),
+                };
+            }
+        }
+
         case 'send-beep': {
             if (!Player?.MemberNumber) {
                 return { success: false, error: 'Not logged in' };
@@ -306,6 +345,32 @@ export async function runQuery(query: PageQuery): Promise<PageQueryResult> {
             return { success: true, data: null };
         }
     }
+}
+
+/**
+ * Ask the server for every public room across all spaces (the same
+ * ChatRoomSearch the game's own search screen sends, with the widest
+ * possible filters), resolving on the one-shot socket reply.
+ */
+function searchAllRooms(): Promise<ServerChatRoomSearchData[]> {
+    return new Promise((resolve, reject) => {
+        const handler = (data: ServerChatRoomSearchResultResponse) => {
+            clearTimeout(timer);
+            resolve(data);
+        };
+        const timer = setTimeout(() => {
+            ServerSocket.off('ChatRoomSearchResult', handler);
+            reject(new Error('The server did not answer the room search'));
+        }, 8000);
+        ServerSocket.once('ChatRoomSearchResult', handler);
+        ServerSend('ChatRoomSearch', {
+            Query: '',
+            Space: ['X', '', 'M', 'Asylum'],
+            FullRooms: true,
+            ShowLocked: true,
+            Language: '',
+        });
+    });
 }
 
 /**
