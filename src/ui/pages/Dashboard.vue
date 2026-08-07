@@ -201,7 +201,7 @@ all chats
         <!-- Recently met -->
         <div class="card p-5 lg:col-span-3">
             <div class="mb-3 flex items-baseline justify-between">
-                <h2 class="font-medium text-white">Recently met</h2>
+                <h2 class="font-medium text-white">Last seen</h2>
                 <RouterLink
                     :to="{ name: 'members', params: { viewer } }"
                     class="text-xs text-accent-soft hover:underline"
