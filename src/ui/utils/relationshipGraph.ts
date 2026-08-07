@@ -9,12 +9,21 @@
  */
 import { db } from '@/shared/db';
 
-export const NODE_W = 156;
-export const NODE_H = 46;
 const H_GAP = 28;
-const LEVEL_H = 120;
+const DEPTH_GAP = 74;
 const TREE_GAP = 64;
 const MAX_NODES = 400;
+
+export interface GraphLayoutOptions {
+    nodeW: number;
+    nodeH: number;
+    /** 'vertical' = owners above submissives, 'horizontal' = owners to the left */
+    orientation: 'vertical' | 'horizontal';
+    /** Multiplier on the gaps between nodes, levels and trees */
+    spacing: number;
+    /** Attach captured appearance images to nodes */
+    portraits: boolean;
+}
 
 interface SlimMember {
     id: number;
@@ -33,6 +42,8 @@ export interface GraphNode {
     color?: string;
     /** Captured in the database (false = placeholder from relationship info) */
     known: boolean;
+    /** Appearance snapshot (only fetched when portraits are enabled) */
+    image?: string;
     /** On the highlighted focal→target path */
     onPath?: boolean;
     x: number;
@@ -61,7 +72,8 @@ export interface RelationshipGraph {
 export async function buildRelationshipGraph(
     focal: number,
     maxDepth: number,
-    pathTarget?: number,
+    pathTarget: number | undefined,
+    opts: GraphLayoutOptions,
 ): Promise<RelationshipGraph> {
     // Slim in-memory view of every captured member (drop images etc.).
     const byId = new Map<number, SlimMember>();
@@ -211,13 +223,23 @@ export async function buildRelationshipGraph(
         }
     }
 
-    layout(nodes, edgeList);
+    // Portraits are heavy (data URLs), so only fetch them for included nodes.
+    if (opts.portraits) {
+        const captured = [...nodes.keys()].filter((id) => id > 0);
+        for (const record of await db.members.bulkGet(captured)) {
+            if (record?.appearanceImage) {
+                nodes.get(record.memberNumber)!.image = record.appearanceImage;
+            }
+        }
+    }
+
+    layout(nodes, edgeList, opts);
 
     let width = 0;
     let height = 0;
     for (const node of nodes.values()) {
-        width = Math.max(width, node.x + NODE_W);
-        height = Math.max(height, node.y + NODE_H);
+        width = Math.max(width, node.x + opts.nodeW);
+        height = Math.max(height, node.y + opts.nodeH);
     }
 
     return { nodes: [...nodes.values()], edges: edgeList, width, height, truncated, pathFound };
@@ -266,8 +288,18 @@ function findPath(
     return null;
 }
 
-/** Tidy-tree layout over the ownership forest; lover-only nodes are roots. */
-function layout(nodes: Map<number, GraphNode>, edges: GraphEdge[]): void {
+/**
+ * Tidy-tree layout over the ownership forest; lover-only nodes are roots.
+ * Positions are computed in tree space (x = breadth, y = depth) and swapped
+ * at the end for the horizontal orientation.
+ */
+function layout(nodes: Map<number, GraphNode>, edges: GraphEdge[], opts: GraphLayoutOptions): void {
+    const breadthSize = opts.orientation === 'vertical' ? opts.nodeW : opts.nodeH;
+    const depthSize = opts.orientation === 'vertical' ? opts.nodeH : opts.nodeW;
+    const hGap = Math.round(H_GAP * opts.spacing);
+    const treeGap = Math.round(TREE_GAP * opts.spacing);
+    const depthStep = depthSize + Math.round(DEPTH_GAP * opts.spacing);
+
     const children = new Map<number, number[]>();
     const hasParent = new Set<number>();
     for (const edge of edges) {
@@ -286,12 +318,12 @@ function layout(nodes: Map<number, GraphNode>, edges: GraphEdge[]): void {
         visited.add(id);
 
         const node = nodes.get(id)!;
-        node.y = depth * LEVEL_H;
+        node.y = depth * depthStep;
 
         const kids = (children.get(id) ?? []).filter((k) => !visited.has(k));
         if (kids.length === 0) {
             node.x = x;
-            return NODE_W;
+            return breadthSize;
         }
 
         let childX = x;
@@ -299,11 +331,11 @@ function layout(nodes: Map<number, GraphNode>, edges: GraphEdge[]): void {
         for (const kid of kids) {
             const w = place(kid, childX, depth + 1);
             if (w > 0) {
-                childX += w + H_GAP;
-                total += w + H_GAP;
+                childX += w + hGap;
+                total += w + hGap;
             }
         }
-        total = Math.max(total - H_GAP, NODE_W);
+        total = Math.max(total - hGap, breadthSize);
 
         // Center the parent over its children's span.
         const firstKid = nodes.get(kids[0]!)!;
@@ -318,7 +350,15 @@ function layout(nodes: Map<number, GraphNode>, edges: GraphEdge[]): void {
         if (visited.has(root)) continue;
         const width = place(root, cursor, 0);
         if (width > 0) {
-            cursor += width + TREE_GAP;
+            cursor += width + treeGap;
+        }
+    }
+
+    if (opts.orientation === 'horizontal') {
+        for (const node of nodes.values()) {
+            const breadth = node.x;
+            node.x = node.y;
+            node.y = breadth;
         }
     }
 }

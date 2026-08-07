@@ -3,15 +3,16 @@
  * Pan/zoomable SVG rendering of the owner/lover network around a member.
  * Solid edges = ownership (grey on trial, white collared), dashed = lovers
  * (red dating, purple engaged, cyan married). Click a node to open them.
+ * Look and layout are configurable via the Style panel (persisted globally).
  */
 import { computed, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import {
     buildRelationshipGraph,
-    NODE_H,
-    NODE_W,
+    type GraphNode,
     type RelationshipGraph,
 } from '../utils/relationshipGraph';
+import { useGraphStyleStore } from '../stores/graphStyle';
 
 const props = defineProps<{
     focal: number;
@@ -24,18 +25,39 @@ const props = defineProps<{
 const emit = defineEmits<{ pathResult: [found: boolean | undefined] }>();
 
 const router = useRouter();
+const style = useGraphStyleStore();
 const graph = ref<RelationshipGraph | null>(null);
 const loading = ref(false);
+const showStyle = ref(false);
 
 const container = ref<HTMLDivElement>();
 const view = ref({ x: 0, y: 0, scale: 1 });
 
+const SPACING = { compact: 0.55, normal: 1, roomy: 1.6 } as const;
+
+// Portrait nodes are a little larger to fit the avatar next to the text.
+const nodeW = computed(() => (style.portraits ? 176 : 156));
+const nodeH = computed(() => (style.portraits ? 58 : 46));
+
 watch(
-    () => [props.focal, props.depth, props.pathTarget],
+    () => [
+        props.focal,
+        props.depth,
+        props.pathTarget,
+        style.orientation,
+        style.spacing,
+        style.portraits,
+    ],
     async () => {
         loading.value = true;
         try {
-            graph.value = await buildRelationshipGraph(props.focal, props.depth, props.pathTarget);
+            graph.value = await buildRelationshipGraph(props.focal, props.depth, props.pathTarget, {
+                nodeW: nodeW.value,
+                nodeH: nodeH.value,
+                orientation: style.orientation,
+                spacing: SPACING[style.spacing],
+                portraits: style.portraits,
+            });
             emit('pathResult', graph.value.pathFound);
             fit();
         } catch (error) {
@@ -104,6 +126,43 @@ function onWheel(event: WheelEvent) {
 const OWNS_COLORS = ['#9ca3af', '#f5f5f5'];
 const LOVES_COLORS = ['#f87171', '#c084fc', '#22d3ee'];
 
+/** Ownership edge: parent's bottom/right side to child's top/left side. */
+function ownsPath(from: GraphNode, to: GraphNode): string {
+    const w = nodeW.value;
+    const h = nodeH.value;
+    if (style.orientation === 'horizontal') {
+        const x1 = from.x + w;
+        const y1 = from.y + h / 2;
+        const x2 = to.x;
+        const y2 = to.y + h / 2;
+        if (style.edges === 'straight') return `M ${x1} ${y1} L ${x2} ${y2}`;
+        const mx = (x1 + x2) / 2;
+        return `M ${x1} ${y1} C ${mx} ${y1}, ${mx} ${y2}, ${x2} ${y2}`;
+    }
+    const x1 = from.x + w / 2;
+    const y1 = from.y + h;
+    const x2 = to.x + w / 2;
+    const y2 = to.y;
+    if (style.edges === 'straight') return `M ${x1} ${y1} L ${x2} ${y2}`;
+    const my = (y1 + y2) / 2;
+    return `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`;
+}
+
+/** Lover edge: center to center, arcing away from the tree flow when curved. */
+function lovesPath(from: GraphNode, to: GraphNode): string {
+    const x1 = from.x + nodeW.value / 2;
+    const y1 = from.y + nodeH.value / 2;
+    const x2 = to.x + nodeW.value / 2;
+    const y2 = to.y + nodeH.value / 2;
+    if (style.edges === 'straight') return `M ${x1} ${y1} L ${x2} ${y2}`;
+    if (style.orientation === 'horizontal') {
+        const bend = 40 + Math.abs(y2 - y1) * 0.08;
+        return `M ${x1} ${y1} C ${x1 - bend} ${y1}, ${x2 - bend} ${y2}, ${x2} ${y2}`;
+    }
+    const bend = 40 + Math.abs(x2 - x1) * 0.08;
+    return `M ${x1} ${y1} C ${x1} ${y1 - bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`;
+}
+
 const positioned = computed(() => {
     const g = graph.value;
     if (!g) return { nodes: [], edges: [] };
@@ -117,26 +176,16 @@ const positioned = computed(() => {
                 edge.type === 'owns'
                     ? (OWNS_COLORS[edge.stage] ?? OWNS_COLORS[0])
                     : (LOVES_COLORS[edge.stage] ?? LOVES_COLORS[0]);
-            let path: string;
-            if (edge.type === 'owns') {
-                const x1 = from.x + NODE_W / 2;
-                const y1 = from.y + NODE_H;
-                const x2 = to.x + NODE_W / 2;
-                const y2 = to.y;
-                const my = (y1 + y2) / 2;
-                path = `M ${x1} ${y1} C ${x1} ${my}, ${x2} ${my}, ${x2} ${y2}`;
-            } else {
-                const x1 = from.x + NODE_W / 2;
-                const y1 = from.y + NODE_H / 2;
-                const x2 = to.x + NODE_W / 2;
-                const y2 = to.y + NODE_H / 2;
-                const bend = 40 + Math.abs(x2 - x1) * 0.08;
-                path = `M ${x1} ${y1} C ${x1} ${y1 - bend}, ${x2} ${y2 - bend}, ${x2} ${y2}`;
-            }
+            const path = edge.type === 'owns' ? ownsPath(from, to) : lovesPath(from, to);
             return { ...edge, path, color, dashed: edge.type === 'loves' };
         }),
     };
 });
+
+function truncate(label: string): string {
+    const max = style.portraits ? 15 : 20;
+    return label.length > max ? label.slice(0, max - 1) + '…' : label;
+}
 
 function openMember(id: number) {
     if (id > 0) {
@@ -157,6 +206,12 @@ function openMember(id: number) {
             @wheel.prevent="onWheel"
         >
             <svg class="h-full w-full select-none">
+                <defs>
+                    <!-- userSpaceOnUse resolves inside each node's translated <g> -->
+                    <clipPath id="bct-graph-portrait" clipPathUnits="userSpaceOnUse">
+                        <rect x="5" y="5" width="34" height="48" rx="4" />
+                    </clipPath>
+                </defs>
                 <g :transform="`translate(${view.x}, ${view.y}) scale(${view.scale})`">
                     <path
                         v-for="(edge, index) in positioned.edges"
@@ -176,34 +231,73 @@ function openMember(id: number) {
                         @click.stop="openMember(node.id)"
                     >
                         <rect
-                            :width="NODE_W"
-                            :height="NODE_H"
+                            :width="nodeW"
+                            :height="nodeH"
                             rx="8"
                             :fill="node.id === focal ? 'rgba(16,185,129,0.18)' : node.onPath ? 'rgba(16,185,129,0.08)' : 'rgba(255,255,255,0.05)'"
                             :stroke="node.id === focal || node.onPath ? '#34d399' : node.known ? 'rgba(255,255,255,0.25)' : 'rgba(255,255,255,0.12)'"
                             :stroke-width="node.id === focal || node.onPath ? 2 : 1"
                             :stroke-dasharray="node.known ? undefined : '4 3'"
                         />
-                        <text
-                            :x="NODE_W / 2"
-                            :y="NODE_H / 2 - 2"
-                            text-anchor="middle"
-                            dominant-baseline="middle"
-                            :fill="node.color || '#e5e5e5'"
-                            font-size="13"
-                            font-weight="600"
-                        >
-                            {{ node.label.length > 20 ? node.label.slice(0, 19) + '…' : node.label }}
-                        </text>
-                        <text
-                            :x="NODE_W / 2"
-                            :y="NODE_H / 2 + 14"
-                            text-anchor="middle"
-                            fill="#737373"
-                            font-size="10"
-                        >
-                            {{ node.id > 0 ? `#${node.id}` : 'not met' }}
-                        </text>
+                        <template v-if="style.portraits">
+                            <rect x="5" y="5" width="34" height="48" rx="4" fill="rgba(255,255,255,0.04)" />
+                            <image
+                                v-if="node.image"
+                                :href="node.image"
+                                x="5"
+                                y="5"
+                                width="34"
+                                height="48"
+                                preserveAspectRatio="xMidYMin slice"
+                                clip-path="url(#bct-graph-portrait)"
+                            />
+                            <text
+                                v-else
+                                x="22"
+                                :y="nodeH / 2"
+                                text-anchor="middle"
+                                dominant-baseline="middle"
+                                fill="#525252"
+                                font-size="16"
+                            >
+                                ?
+                            </text>
+                            <text
+                                x="46"
+                                :y="nodeH / 2 - 3"
+                                dominant-baseline="middle"
+                                :fill="node.color || '#e5e5e5'"
+                                font-size="13"
+                                font-weight="600"
+                            >
+                                {{ truncate(node.label) }}
+                            </text>
+                            <text x="46" :y="nodeH / 2 + 13" fill="#737373" font-size="10">
+                                {{ node.id > 0 ? `#${node.id}` : 'not met' }}
+                            </text>
+                        </template>
+                        <template v-else>
+                            <text
+                                :x="nodeW / 2"
+                                :y="nodeH / 2 - 2"
+                                text-anchor="middle"
+                                dominant-baseline="middle"
+                                :fill="node.color || '#e5e5e5'"
+                                font-size="13"
+                                font-weight="600"
+                            >
+                                {{ truncate(node.label) }}
+                            </text>
+                            <text
+                                :x="nodeW / 2"
+                                :y="nodeH / 2 + 14"
+                                text-anchor="middle"
+                                fill="#737373"
+                                font-size="10"
+                            >
+                                {{ node.id > 0 ? `#${node.id}` : 'not met' }}
+                            </text>
+                        </template>
                     </g>
                 </g>
             </svg>
@@ -215,14 +309,60 @@ function openMember(id: number) {
                 Building graph…
             </div>
 
-            <button
-                class="btn absolute top-2 right-2 px-2 py-1 text-xs"
-                title="Reset view"
-                @click.stop="fit"
+            <div class="absolute top-2 right-2 flex gap-1.5">
+                <button
+                    class="btn px-2 py-1 text-xs"
+                    :class="showStyle ? 'bg-white/10' : ''"
+                    title="Graph style"
+                    @pointerdown.stop
+                    @click.stop="showStyle = !showStyle"
+                >
+                    Style
+                </button>
+                <button
+                    class="btn px-2 py-1 text-xs"
+                    title="Reset view"
+                    @pointerdown.stop
+                    @click.stop="fit"
+                >
+                    Fit
+                </button>
+            </div>
+
+            <div
+                v-if="showStyle"
+                class="absolute top-10 right-2 z-10 w-52 space-y-2 rounded-lg border border-white/10 bg-surface p-3 shadow-xl"
+                @pointerdown.stop
+                @wheel.stop
             >
-                Fit
-            </button>
-        </div>
+                <label class="flex items-center justify-between gap-2 text-xs text-neutral-400">
+                    Layout
+                    <select v-model="style.orientation" class="input w-28 py-0.5 text-xs">
+                        <option value="vertical">Top-down</option>
+                        <option value="horizontal">Sideways</option>
+                    </select>
+                </label>
+                <label class="flex items-center justify-between gap-2 text-xs text-neutral-400">
+                    Spacing
+                    <select v-model="style.spacing" class="input w-28 py-0.5 text-xs">
+                        <option value="compact">Compact</option>
+                        <option value="normal">Normal</option>
+                        <option value="roomy">Roomy</option>
+                    </select>
+                </label>
+                <label class="flex items-center justify-between gap-2 text-xs text-neutral-400">
+                    Edges
+                    <select v-model="style.edges" class="input w-28 py-0.5 text-xs">
+                        <option value="curved">Curved</option>
+                        <option value="straight">Straight</option>
+                    </select>
+                </label>
+                <label class="flex items-center justify-between gap-2 text-xs text-neutral-400">
+                    Portraits
+                    <input v-model="style.portraits" type="checkbox" class="accent-accent" />
+                </label>
+            </div>
+</div>
 
         <div class="mt-2 flex flex-wrap items-center gap-x-4 gap-y-1 text-xs text-neutral-500">
             <span><span class="mr-1 inline-block h-0.5 w-5 align-middle" style="background: #9ca3af"></span>On trial</span>
