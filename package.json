@@ -2,7 +2,7 @@
     "name": "bc-toolbox",
     "private": true,
     "type": "module",
-    "version": "1.16.0",
+    "version": "1.16.1",
     "description": "BC Toolbox - member lookup, chat logging and tools for Bondage Club",
     "scripts": {
         "dev": "node scripts/build.mjs --watch",
