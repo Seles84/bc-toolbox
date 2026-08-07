@@ -205,6 +205,48 @@ const positioned = computed(() => {
     };
 });
 
+// -- Mermaid export ----------------------------------------------------------
+
+const showMermaid = ref(false);
+const copied = ref(false);
+
+const OWNS_LABELS = ['on trial', 'collared'];
+const LOVES_LABELS = ['dating', 'engaged', 'married'];
+
+/** The current graph expressed as Mermaid flowchart code. */
+const mermaidCode = computed(() => {
+    const g = graph.value;
+    if (!g) return '';
+    const idOf = (id: number) => (id > 0 ? `m${id}` : `u${-id}`);
+    const esc = (s: string) => s.replace(/"/g, '#quot;');
+    const lines = [`graph ${style.orientation === 'horizontal' ? 'LR' : 'TD'}`];
+    lines.push('    classDef focal stroke:#34d399,stroke-width:2px');
+    for (const node of g.nodes) {
+        const label = node.id > 0 ? `${esc(node.label)} #${node.id}` : `${esc(node.label)} (not met)`;
+        lines.push(`    ${idOf(node.id)}["${label}"]${node.id === props.focal ? ':::focal' : ''}`);
+    }
+    for (const edge of g.edges) {
+        if (edge.type === 'owns') {
+            const label = OWNS_LABELS[edge.stage] ?? OWNS_LABELS[0];
+            lines.push(`    ${idOf(edge.from)} -->|${label}| ${idOf(edge.to)}`);
+        } else {
+            const label = LOVES_LABELS[edge.stage] ?? LOVES_LABELS[0];
+            lines.push(`    ${idOf(edge.from)} -. ${label} .- ${idOf(edge.to)}`);
+        }
+    }
+    return lines.join('\n');
+});
+
+async function copyMermaid() {
+    try {
+        await navigator.clipboard.writeText(mermaidCode.value);
+        copied.value = true;
+        setTimeout(() => (copied.value = false), 1500);
+    } catch (error) {
+        console.error('[BCT] clipboard write failed', error);
+    }
+}
+
 function truncate(label: string): string {
     const max = style.portraits ? 15 : 20;
     return label.length > max ? label.slice(0, max - 1) + '…' : label;
@@ -359,6 +401,45 @@ function openMember(id: number) {
                 >
                     {{ fullscreen ? 'Exit' : 'Fullscreen' }}
                 </button>
+                <button
+                    class="btn px-2 py-1 text-xs"
+                    :class="showMermaid ? 'bg-white/10' : ''"
+                    title="Preview this graph as Mermaid code"
+                    @pointerdown.stop
+                    @click.stop="showMermaid = !showMermaid"
+                >
+                    Code
+                </button>
+            </div>
+
+            <div
+                v-if="showMermaid"
+                class="absolute inset-2 z-20 flex flex-col rounded-lg border border-white/10 bg-surface p-3 shadow-xl"
+                @pointerdown.stop
+                @wheel.stop
+            >
+                <div class="mb-2 flex items-center gap-3">
+                    <h3 class="text-sm font-medium text-white">Mermaid code</h3>
+                    <a
+                        href="https://mermaid.live"
+                        target="_blank"
+                        rel="noreferrer"
+                        class="text-xs text-accent-soft hover:underline"
+                        >
+paste into mermaid.live
+</a
+                    >
+                    <button class="btn ml-auto px-2 py-1 text-xs" @click.stop="copyMermaid">
+                        {{ copied ? 'Copied!' : 'Copy' }}
+                    </button>
+                    <button class="btn px-2 py-1 text-xs" @click.stop="showMermaid = false">
+                        Close
+                    </button>
+                </div>
+                <pre
+                    class="min-h-0 flex-1 overflow-auto rounded bg-surface-2/60 p-3 text-xs text-neutral-300 select-text"
+                    >{{ mermaidCode }}</pre
+                >
             </div>
 
             <div
