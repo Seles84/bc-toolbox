@@ -35,9 +35,27 @@ const view = ref({ x: 0, y: 0, scale: 1 });
 
 const SPACING = { compact: 0.55, normal: 1, roomy: 1.6 } as const;
 
-// Portrait nodes are a little larger to fit the avatar next to the text.
-const nodeW = computed(() => (style.portraits ? 176 : 156));
-const nodeH = computed(() => (style.portraits ? 58 : 46));
+// Node card dimensions per node style.
+const NODE_SIZES = {
+    name: { w: 156, h: 46 },
+    portrait: { w: 64, h: 84 },
+    left: { w: 176, h: 58 },
+    top: { w: 110, h: 104 },
+} as const;
+const nodeW = computed(() => NODE_SIZES[style.nodeStyle].w);
+const nodeH = computed(() => NODE_SIZES[style.nodeStyle].h);
+
+/** Where the avatar sits inside the node card, per node style. */
+const portraitBox = computed(() => {
+    switch (style.nodeStyle) {
+        case 'portrait':
+            return { x: 5, y: 5, w: nodeW.value - 10, h: nodeH.value - 10 };
+        case 'top':
+            return { x: (nodeW.value - 56) / 2, y: 5, w: 56, h: 64 };
+        default:
+            return { x: 5, y: 5, w: 34, h: 48 };
+    }
+});
 
 watch(
     () => [
@@ -46,7 +64,7 @@ watch(
         props.pathTarget,
         style.orientation,
         style.spacing,
-        style.portraits,
+        style.nodeStyle,
     ],
     async () => {
         loading.value = true;
@@ -56,7 +74,7 @@ watch(
                 nodeH: nodeH.value,
                 orientation: style.orientation,
                 spacing: SPACING[style.spacing],
-                portraits: style.portraits,
+                portraits: style.nodeStyle !== 'name',
             });
             emit('pathResult', graph.value.pathFound);
             fit();
@@ -248,7 +266,7 @@ async function copyMermaid() {
 }
 
 function truncate(label: string): string {
-    const max = style.portraits ? 15 : 20;
+    const max = style.nodeStyle === 'left' ? 15 : style.nodeStyle === 'top' ? 14 : 20;
     return label.length > max ? label.slice(0, max - 1) + '…' : label;
 }
 
@@ -275,7 +293,13 @@ function openMember(id: number) {
                 <defs>
                     <!-- userSpaceOnUse resolves inside each node's translated <g> -->
                     <clipPath id="bct-graph-portrait" clipPathUnits="userSpaceOnUse">
-                        <rect x="5" y="5" width="34" height="48" rx="4" />
+                        <rect
+                            :x="portraitBox.x"
+                            :y="portraitBox.y"
+                            :width="portraitBox.w"
+                            :height="portraitBox.h"
+                            rx="4"
+                        />
                     </clipPath>
                 </defs>
                 <g :transform="`translate(${view.x}, ${view.y}) scale(${view.scale})`">
@@ -305,22 +329,34 @@ function openMember(id: number) {
                             :stroke-width="node.id === focal || node.onPath ? 2 : 1"
                             :stroke-dasharray="node.known ? undefined : '4 3'"
                         />
-                        <template v-if="style.portraits">
-                            <rect x="5" y="5" width="34" height="48" rx="4" fill="rgba(255,255,255,0.04)" />
+                        <title>
+                            {{ node.label }} {{ node.id > 0 ? `#${node.id}` : '(not met)' }}
+                        </title>
+
+                        <!-- Avatar (all node styles except name-only) -->
+                        <template v-if="style.nodeStyle !== 'name'">
+                            <rect
+                                :x="portraitBox.x"
+                                :y="portraitBox.y"
+                                :width="portraitBox.w"
+                                :height="portraitBox.h"
+                                rx="4"
+                                fill="rgba(255,255,255,0.04)"
+                            />
                             <image
                                 v-if="node.image"
                                 :href="node.image"
-                                x="5"
-                                y="5"
-                                width="34"
-                                height="48"
+                                :x="portraitBox.x"
+                                :y="portraitBox.y"
+                                :width="portraitBox.w"
+                                :height="portraitBox.h"
                                 preserveAspectRatio="xMidYMin slice"
                                 clip-path="url(#bct-graph-portrait)"
                             />
                             <text
                                 v-else
-                                x="22"
-                                :y="nodeH / 2"
+                                :x="portraitBox.x + portraitBox.w / 2"
+                                :y="portraitBox.y + portraitBox.h / 2"
                                 text-anchor="middle"
                                 dominant-baseline="middle"
                                 fill="#525252"
@@ -328,6 +364,10 @@ function openMember(id: number) {
                             >
                                 ?
                             </text>
+                        </template>
+
+                        <!-- Name beside the avatar -->
+                        <template v-if="style.nodeStyle === 'left'">
                             <text
                                 x="46"
                                 :y="nodeH / 2 - 3"
@@ -342,7 +382,33 @@ function openMember(id: number) {
                                 {{ node.id > 0 ? `#${node.id}` : 'not met' }}
                             </text>
                         </template>
-                        <template v-else>
+
+                        <!-- Name under the avatar -->
+                        <template v-else-if="style.nodeStyle === 'top'">
+                            <text
+                                :x="nodeW / 2"
+                                :y="nodeH - 24"
+                                text-anchor="middle"
+                                dominant-baseline="middle"
+                                :fill="node.color || '#e5e5e5'"
+                                font-size="12"
+                                font-weight="600"
+                            >
+                                {{ truncate(node.label) }}
+                            </text>
+                            <text
+                                :x="nodeW / 2"
+                                :y="nodeH - 10"
+                                text-anchor="middle"
+                                fill="#737373"
+                                font-size="10"
+                            >
+                                {{ node.id > 0 ? `#${node.id}` : 'not met' }}
+                            </text>
+                        </template>
+
+                        <!-- Name-only card -->
+                        <template v-else-if="style.nodeStyle === 'name'">
                             <text
                                 :x="nodeW / 2"
                                 :y="nodeH / 2 - 2"
@@ -471,8 +537,13 @@ paste into mermaid.live
                     </select>
                 </label>
                 <label class="flex items-center justify-between gap-2 text-xs text-neutral-400">
-                    Portraits
-                    <input v-model="style.portraits" type="checkbox" class="accent-accent" />
+                    Nodes
+                    <select v-model="style.nodeStyle" class="input w-28 py-0.5 text-xs">
+                        <option value="left">Portrait + name</option>
+                        <option value="top">Portrait above</option>
+                        <option value="portrait">Portrait only</option>
+                        <option value="name">Name only</option>
+                    </select>
                 </label>
             </div>
 </div>

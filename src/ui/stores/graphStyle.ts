@@ -9,36 +9,42 @@ import { ref, watch } from 'vue';
 export type GraphOrientation = 'vertical' | 'horizontal';
 export type GraphSpacing = 'compact' | 'normal' | 'roomy';
 export type GraphEdgeStyle = 'curved' | 'straight';
+/** What each node card shows: text, avatar, or both (side by side / stacked) */
+export type GraphNodeStyle = 'name' | 'portrait' | 'left' | 'top';
 
 export interface GraphStyleSettings {
     orientation: GraphOrientation;
     spacing: GraphSpacing;
     edges: GraphEdgeStyle;
-    portraits: boolean;
+    nodeStyle: GraphNodeStyle;
 }
 
 const DEFAULTS: GraphStyleSettings = {
     orientation: 'vertical',
     spacing: 'normal',
     edges: 'curved',
-    portraits: true,
+    nodeStyle: 'left',
 };
 
 export const useGraphStyleStore = defineStore('graphStyle', () => {
     const orientation = ref<GraphOrientation>(DEFAULTS.orientation);
     const spacing = ref<GraphSpacing>(DEFAULTS.spacing);
     const edges = ref<GraphEdgeStyle>(DEFAULTS.edges);
-    const portraits = ref(DEFAULTS.portraits);
+    const nodeStyle = ref<GraphNodeStyle>(DEFAULTS.nodeStyle);
 
     let loaded = false;
     let applying = false;
 
-    function apply(stored: Partial<GraphStyleSettings> | undefined) {
+    function apply(
+        stored: (Partial<GraphStyleSettings> & { portraits?: boolean }) | undefined,
+    ) {
         applying = true;
         orientation.value = stored?.orientation ?? DEFAULTS.orientation;
         spacing.value = stored?.spacing ?? DEFAULTS.spacing;
         edges.value = stored?.edges ?? DEFAULTS.edges;
-        portraits.value = stored?.portraits ?? DEFAULTS.portraits;
+        // Migrate the old boolean portraits setting.
+        nodeStyle.value =
+            stored?.nodeStyle ?? (stored?.portraits === false ? 'name' : DEFAULTS.nodeStyle);
         applying = false;
     }
 
@@ -52,18 +58,18 @@ export const useGraphStyleStore = defineStore('graphStyle', () => {
         }
     });
 
-    watch([orientation, spacing, edges, portraits], () => {
+    watch([orientation, spacing, edges, nodeStyle], () => {
         if (loaded && !applying) {
             void chrome.storage.local.set({
                 graphStyle: {
                     orientation: orientation.value,
                     spacing: spacing.value,
                     edges: edges.value,
-                    portraits: portraits.value,
+                    nodeStyle: nodeStyle.value,
                 } satisfies GraphStyleSettings,
             });
         }
     });
 
-    return { orientation, spacing, edges, portraits };
+    return { orientation, spacing, edges, nodeStyle };
 });
