@@ -79,6 +79,14 @@ export async function buildRelationshipGraph(
     const byId = new Map<number, SlimMember>();
     const subsByOwner = new Map<number, number[]>();
     await db.members.each((m) => {
+        // Reverse ownership index — this is what lets the BFS walk downward
+        // from an owner to their submissives.
+        const ownerId = m.ownership?.MemberNumber;
+        if (ownerId) {
+            let subs = subsByOwner.get(ownerId);
+            if (!subs) subsByOwner.set(ownerId, (subs = []));
+            subs.push(m.memberNumber);
+        }
         byId.set(m.memberNumber, {
             id: m.memberNumber,
             label: m.nickname || m.name || `#${m.memberNumber}`,
