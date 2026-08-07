@@ -5,7 +5,7 @@
  * (red dating, purple engaged, cyan married). Click a node to open them.
  * Look and layout are configurable via the Style panel (persisted globally).
  */
-import { computed, ref, watch } from 'vue';
+import { computed, nextTick, onBeforeUnmount, onMounted, ref, watch } from 'vue';
 import { useRouter } from 'vue-router';
 import {
     buildRelationshipGraph,
@@ -68,6 +68,29 @@ watch(
     },
     { immediate: true },
 );
+
+// -- Fullscreen --------------------------------------------------------------
+
+const fullscreen = ref(false);
+
+async function toggleFullscreen() {
+    const el = container.value;
+    if (!el) return;
+    if (document.fullscreenElement) {
+        await document.exitFullscreen();
+    } else {
+        await el.requestFullscreen();
+    }
+}
+
+function onFullscreenChange() {
+    fullscreen.value = document.fullscreenElement === container.value;
+    // Refit once the container has its new size.
+    void nextTick(() => requestAnimationFrame(fit));
+}
+
+onMounted(() => document.addEventListener('fullscreenchange', onFullscreenChange));
+onBeforeUnmount(() => document.removeEventListener('fullscreenchange', onFullscreenChange));
 
 function fit() {
     const g = graph.value;
@@ -198,7 +221,8 @@ function openMember(id: number) {
     <div>
         <div
             ref="container"
-            class="relative h-[420px] cursor-grab touch-none overflow-hidden rounded-lg border border-white/10 bg-surface-2/40 active:cursor-grabbing"
+            class="relative cursor-grab touch-none overflow-hidden rounded-lg border border-white/10 active:cursor-grabbing"
+            :class="fullscreen ? 'h-full w-full bg-surface' : 'h-[420px] bg-surface-2/40'"
             @pointerdown="onPointerDown"
             @pointermove="onPointerMove"
             @pointerup="onPointerUp"
@@ -326,6 +350,14 @@ function openMember(id: number) {
                     @click.stop="fit"
                 >
                     Fit
+                </button>
+                <button
+                    class="btn px-2 py-1 text-xs"
+                    :title="fullscreen ? 'Exit fullscreen (Esc)' : 'Fullscreen'"
+                    @pointerdown.stop
+                    @click.stop="toggleFullscreen"
+                >
+                    {{ fullscreen ? 'Exit' : 'Fullscreen' }}
                 </button>
             </div>
 
