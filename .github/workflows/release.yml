@@ -1,0 +1,42 @@
+# Builds the extension from a pushed vX.Y.Z tag and publishes a GitHub
+# release with the installable zip attached.
+#
+# The job runs in the "release" environment. With a required reviewer set on
+# that environment (Settings → Environments → release → Required reviewers),
+# every run PAUSES before anything is built until a human approves it in the
+# Actions tab — nothing is compiled or published without that confirmation.
+name: Release
+
+on:
+    push:
+        tags: ['v*']
+
+permissions:
+    contents: write
+
+jobs:
+    release:
+        runs-on: ubuntu-latest
+        environment: release
+        steps:
+            - uses: actions/checkout@v4
+
+            - uses: actions/setup-node@v4
+              with:
+                  node-version: 22
+                  cache: yarn
+
+            - run: yarn install --frozen-lockfile
+
+            - run: yarn type-check
+
+            - run: yarn build
+
+            - name: Package zip (manifest at archive root)
+              run: cd dist && zip -r "../bc-toolbox-${GITHUB_REF_NAME}.zip" .
+
+            - name: Publish GitHub release
+              uses: softprops/action-gh-release@v2
+              with:
+                  files: bc-toolbox-${{ github.ref_name }}.zip
+                  generate_release_notes: true
