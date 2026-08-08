@@ -1,8 +1,17 @@
 <script setup lang="ts">
-import { computed, ref, watch } from 'vue';
+import { computed, onUnmounted, ref, watch } from 'vue';
 import { useRoute } from 'vue-router';
+import lz from 'lz-string';
 import { db } from '@/shared/db';
-import type { MemberRecord, MemberSeenRecord } from '@/shared/records';
+import type { MemberRecord, MemberSeenRecord, WornItem } from '@/shared/records';
+import {
+    effectInfo,
+    formatDuration,
+    rawOf,
+    type RawItemBundle,
+    type RawItemCraft,
+    type RawItemProperty,
+} from '../utils/itemExplain';
 import BioText from '../components/BioText.vue';
 import { useLiveQuery } from '../composables/useLiveQuery';
 import RelationshipsGraph from '../components/RelationshipsGraph.vue';
@@ -39,8 +48,78 @@ const tab = ref<
     | 'notes'
 >('stats');
 const graphDepth = ref(3);
-/** Wearing tab: slot group whose raw item bundle is expanded */
+/** Wearing tab: slot group whose item breakdown is expanded */
 const rawShown = ref<string | null>(null);
+/** Whether the expanded breakdown also shows the raw JSON */
+const rawJson = ref(false);
+
+// Ticking clock for live lock-timer countdowns.
+const now = ref(Date.now());
+const nowTimer = setInterval(() => (now.value = Date.now()), 1_000);
+onUnmounted(() => clearInterval(nowTimer));
+
+function bundleOf(item: WornItem): RawItemBundle | null {
+    return rawOf(item.raw);
+}
+
+function propOf(item: WornItem): RawItemProperty | undefined {
+    return bundleOf(item)?.Property;
+}
+
+function craftOf(item: WornItem): RawItemCraft | undefined {
+    return bundleOf(item)?.Craft;
+}
+
+function removeTimerOf(item: WornItem): number | null {
+    const t = propOf(item)?.RemoveTimer;
+    return typeof t === 'number' && t > 0 ? t : null;
+}
+
+function countdownLabel(target: number): string {
+    const left = target - now.value;
+    return left <= 0 ? 'due' : formatDuration(left);
+}
+
+/** Item variant: the modern TypeRecord or the legacy Type string. */
+function variantOf(item: WornItem): string | null {
+    const p = propOf(item);
+    if (!p) return null;
+    if (typeof p.Type === 'string' && p.Type) return p.Type;
+    if (p.TypeRecord) {
+        const entries = Object.entries(p.TypeRecord).map(([k, v]) => `${k}${v}`);
+        if (entries.length > 0) return entries.join(' ');
+    }
+    return null;
+}
+
+/** Engraved/written texts on the item. */
+function textsOf(item: WornItem): string[] {
+    const p = propOf(item);
+    return [p?.Text, p?.Text2, p?.Text3].filter((t): t is string => !!t);
+}
+
+function toggleBreakdown(group: string) {
+    rawShown.value = rawShown.value === group ? null : group;
+    rawJson.value = false;
+}
+
+// -- Copy as outfit code -----------------------------------------------------
+
+const outfitCopied = ref(false);
+
+const hasRawOutfit = computed(() => (member.value?.wornItems ?? []).some((i) => i.raw));
+
+async function copyOutfitCode() {
+    const bundles = (member.value?.wornItems ?? []).map((i) => i.raw).filter(Boolean);
+    if (bundles.length === 0) return;
+    try {
+        await navigator.clipboard.writeText(lz.compressToBase64(JSON.stringify(bundles)));
+        outfitCopied.value = true;
+        setTimeout(() => (outfitCopied.value = false), 2_000);
+    } catch (error) {
+        console.error('[BCT] clipboard write failed', error);
+    }
+}
 const pathQuery = ref('');
 const pathTarget = ref<number | undefined>(undefined);
 const pathFound = ref<boolean | undefined>(undefined);
@@ -621,9 +700,19 @@ const stats = computed(() => {
                             meeting them (or Update now while in the same room) fills it in.
                         </p>
                         <template v-else>
-                            <p class="text-xs text-neutral-600">
-                                As of {{ new Date(member.capturedAt).toLocaleString() }}
-                            </p>
+                            <div class="flex flex-wrap items-center gap-3">
+                                <p class="text-xs text-neutral-600">
+                                    As of {{ new Date(member.capturedAt).toLocaleString() }}
+                                </p>
+                                <button
+                                    v-if="hasRawOutfit"
+                                    class="btn px-2 py-0.5 text-xs"
+                                    title="Copy everything they're wearing as an importable outfit code"
+                                    @click="copyOutfitCode"
+                                >
+                                    {{ outfitCopied ? 'Copied!' : 'Copy outfit code' }}
+                                </button>
+                            </div>
                             <section v-if="wornRestraints.length">
                                 <h3 class="mb-2 text-sm font-semibold text-rose-300/80">
                                     Restraints ({{ wornRestraints.length }})
@@ -665,20 +754,141 @@ const stats = computed(() => {
                                                 >
                                             </template>
                                         </span>
+                                        <span
+                                            v-if="removeTimerOf(item) !== null"
+                                            class="rounded bg-sky-500/15 px-1.5 py-0.5 text-[10px] font-medium text-sky-300"
+                                            :title="`Until ${new Date(removeTimerOf(item)!).toLocaleString()}`"
+                                            >⏱ {{ countdownLabel(removeTimerOf(item)!) }}</span
+                                        >
                                         <button
                                             v-if="item.raw"
                                             class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-neutral-400 hover:bg-surface-3 hover:text-white"
                                             :class="rawShown === item.group ? '!text-white bg-surface-3' : ''"
-                                            title="Raw item data as the game sees it"
-                                            @click="rawShown = rawShown === item.group ? null : item.group"
+                                            title="Full breakdown of this item"
+                                            @click="toggleBreakdown(item.group)"
                                         >
-                                            raw
+                                            details
                                         </button>
-                                        <pre
-                                            v-if="rawShown === item.group"
-                                            class="mt-1 w-full overflow-x-auto rounded bg-surface-2/60 p-2 font-mono text-[11px] leading-relaxed text-neutral-300"
-                                            >{{ JSON.stringify(item.raw, null, 2) }}</pre
+                                        <div
+                                            v-if="rawShown === item.group && bundleOf(item)"
+                                            class="mt-1 w-full space-y-2 rounded bg-surface-2/60 p-3 text-xs"
                                         >
+                                            <div class="text-neutral-500">
+                                                <span class="font-mono text-neutral-400"
+                                                    >{{ bundleOf(item)!.Group }}/{{ bundleOf(item)!.Name }}</span
+                                                >
+                                                <template v-if="typeof bundleOf(item)!.Difficulty === 'number'">
+                                                    · difficulty {{ bundleOf(item)!.Difficulty }}
+</template
+                                                >
+                                                <template v-if="variantOf(item)">
+                                                    · variant {{ variantOf(item) }}
+</template
+                                                >
+                                                <template v-if="typeof propOf(item)?.Intensity === 'number'">
+                                                    · intensity {{ propOf(item)!.Intensity }}
+</template
+                                                >
+                                            </div>
+
+                                            <div v-if="propOf(item)?.Effect?.length" class="flex flex-wrap items-baseline gap-1">
+                                                <span class="mr-1 text-neutral-400">Effects:</span>
+                                                <span
+                                                    v-for="effect in propOf(item)!.Effect"
+                                                    :key="effect"
+                                                    class="rounded bg-surface-2 px-1.5 py-0.5 text-[10px] text-neutral-300"
+                                                    :title="effectInfo(effect).label"
+                                                    >{{ effectInfo(effect).desc || effectInfo(effect).label }}</span
+                                                >
+                                            </div>
+
+                                            <div v-if="propOf(item)?.LockedBy" class="text-neutral-300">
+                                                <span class="text-neutral-400">Lock:</span>
+                                                {{ lockLabel(propOf(item)!.LockedBy) }}
+                                                <template v-if="propOf(item)!.LockMemberNumber">
+                                                    by
+                                                    <RouterLink
+                                                        :to="{
+                                                            name: 'member',
+                                                            params: {
+                                                                viewer,
+                                                                member: Number(propOf(item)!.LockMemberNumber),
+                                                            },
+                                                        }"
+                                                        class="text-accent-soft hover:underline"
+                                                        >
+{{
+                                                            makers.get(Number(propOf(item)!.LockMemberNumber)) ??
+                                                            `#${propOf(item)!.LockMemberNumber}`
+                                                        }}
+</RouterLink
+                                                    >
+                                                </template>
+                                                <template v-if="removeTimerOf(item) !== null">
+                                                    — {{ propOf(item)!.RemoveItem ? 'comes off' : 'opens' }} in
+                                                    {{ countdownLabel(removeTimerOf(item)!) }}
+                                                    <span class="text-neutral-500"
+                                                        >({{ new Date(removeTimerOf(item)!).toLocaleString() }}<template
+                                                            v-if="propOf(item)!.ShowTimer === false"
+                                                        >
+                                                            · timer hidden from them</template
+                                                        >)</span
+                                                    >
+                                                </template>
+                                            </div>
+
+                                            <div v-if="textsOf(item).length" class="text-neutral-300">
+                                                <span class="text-neutral-400">Engraved:</span>
+                                                {{ textsOf(item).join(' · ') }}
+                                            </div>
+
+                                            <div v-if="craftOf(item)" class="space-y-0.5 text-neutral-300">
+                                                <div>
+                                                    <span class="text-neutral-400">Craft:</span>
+                                                    "{{ craftOf(item)!.Name }}"
+                                                    <template v-if="craftOf(item)!.Property">
+                                                        ({{ craftOf(item)!.Property }})
+</template
+                                                    >
+                                                    <template v-if="craftOf(item)!.MemberNumber">
+                                                        by
+                                                        <RouterLink
+                                                            :to="{
+                                                                name: 'member',
+                                                                params: { viewer, member: craftOf(item)!.MemberNumber },
+                                                            }"
+                                                            class="text-accent-soft hover:underline"
+                                                            >
+{{ craftOf(item)!.MemberName || `#${craftOf(item)!.MemberNumber}` }}
+</RouterLink
+                                                        >
+                                                    </template>
+                                                    <span v-if="craftOf(item)!.Private" class="text-neutral-500">
+                                                        · private</span
+                                                    >
+                                                </div>
+                                                <div v-if="craftOf(item)!.Description" class="text-neutral-400 italic">
+                                                    {{ craftOf(item)!.Description }}
+                                                </div>
+                                                <div v-if="craftOf(item)!.Lore" class="text-neutral-500 italic">
+                                                    {{ craftOf(item)!.Lore }}
+                                                </div>
+                                            </div>
+
+                                            <div>
+                                                <button
+                                                    class="text-[10px] text-neutral-500 hover:text-white"
+                                                    @click="rawJson = !rawJson"
+                                                >
+                                                    {{ rawJson ? 'hide raw JSON' : 'show raw JSON' }}
+                                                </button>
+                                                <pre
+                                                    v-if="rawJson"
+                                                    class="mt-1 overflow-x-auto rounded bg-surface/60 p-2 font-mono text-[11px] leading-relaxed text-neutral-300"
+                                                    >{{ JSON.stringify(item.raw, null, 2) }}</pre
+                                                >
+                                            </div>
+                                        </div>
                                     </li>
                                 </ul>
                             </section>
